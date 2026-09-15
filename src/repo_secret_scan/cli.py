@@ -15,6 +15,7 @@ from .dataset import Dataset
 from .models import Severity
 from .org import load_results, scan_owner, write_org_reports
 from .pipeline import reprocess, scan_repo
+from .reporters import REPORTERS
 from .sources import CommitRange, FullHistory, WorkingTree, resolve_target
 
 app = typer.Typer(no_args_is_help=True, help="Find leaked secrets in a git repository or a whole GitHub organisation.")
@@ -51,12 +52,18 @@ def scan(
     head: Annotated[str, typer.Option(help="Head commit for --scope range.")] = "HEAD",
     scanner: Annotated[Optional[list[str]], typer.Option("--scanner", "-s", help="Override configured scanners.")] = None,
     fail_on: Annotated[Optional[Severity], typer.Option(help="Exit 1 if an unsuppressed finding is at least this severe.")] = None,
+    report_format: Annotated[Optional[list[str]], typer.Option("--format", "-f", help="Add a report format, e.g. github-annotations (repeatable).")] = None,
     config_path: ConfigOpt = None,
 ) -> None:
     """Scan one repository."""
     config = load_config(config_path)
     if scanner:
         config.scanners = scanner
+    for name in report_format or []:
+        if name not in REPORTERS:
+            raise typer.BadParameter(f"unknown format {name!r}; available: {', '.join(REPORTERS.names())}")
+        if name not in config.reporters:
+            config.reporters.append(name)
     if scope is ScopeChoice.range:
         if not base:
             raise typer.BadParameter("--scope range needs --base")

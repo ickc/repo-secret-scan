@@ -7,6 +7,6 @@ decorated class away.
 """
 
 from .base import ORG_REPORTERS, REPORTERS, OrgReporter, RepoReporter
-from . import dashboard, markdown, sarif  # noqa: F401,E402  (registers built-ins)
+from . import annotations, dashboard, markdown, sarif  # noqa: F401,E402  (registers built-ins)
 
 __all__ = ["ORG_REPORTERS", "REPORTERS", "OrgReporter", "RepoReporter"]
