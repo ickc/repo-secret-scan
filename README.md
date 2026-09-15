@@ -54,14 +54,15 @@ either Action, so the Actions' terms don't apply to it.
 | Live-credential verification | No | Yes, usually enabled via `--results=verified,unknown` | Off by default; `[scanner.trufflehog] verify = true`, or a custom processor |
 | False-positive handling | `.gitleaks.toml` allowlists, `.gitleaksignore` fingerprints | Verification; detector include/exclude | Everything the tools support, plus explained severity triage, path tags, cross-scanner agreement and a hash-based `.secret-scan-ignore.toml` |
 | "Still in HEAD?" | No | No | Yes (`in-head` processor) |
-| Output | Job summary, PR review comments, user notifications, SARIF artifact | Workflow annotations and a failing exit code; SARIF only when you run the CLI yourself | `report.md` (job summary), SARIF, JSONL; CSV and dashboard for organisation scans |
+| Output | Job summary, PR review comments, user notifications, SARIF artifact | Workflow annotations and a failing exit code; SARIF only when you run the CLI yourself | `report.md` (job summary), workflow annotations (`github-annotations`), failing exit code, SARIF, JSONL; CSV and dashboard for organisation scans |
 | Many repositories at once | No (per repository) | CLI can scan a GitHub org (`trufflehog github --org`), without triage or reports | `org` command: filters, caching, retries, merged reports, reused-secret detection |
 | Version pinning | Hard-coded default, or `GITLEAKS_VERSION` | Docker tag, default `latest` | Pinned versions with SHA-256 verification |
 | Maintained by | Gitleaks LLC | Truffle Security | You |
 
 Things the upstream Actions do that this package does not (yet): PR review
 comments and user notifications (gitleaks-action), ready-made Docker images, and
-trufflehog's non-git sources (S3, Docker images, Slack, …).
+trufflehog's non-git sources (S3, Docker images, Slack, …). Workflow annotations
+cover most of what PR comments are used for.
 
 Notes on the licences (not legal advice):
 
@@ -185,6 +186,28 @@ directory for `org`):
 - `result.json` — status, scanner runs, versions, errors, fingerprint
 - `report.md` — human summary; also works as a GitHub job summary
 - `results.sarif` — for GitHub code scanning (see *What is SARIF?*)
+- `annotations.txt` — with `--format github-annotations` (or `reporters = [..., "github-annotations"]`)
+
+### GitHub workflow annotations
+
+The `github-annotations` reporter writes GitHub Actions
+[workflow commands](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#setting-an-error-message)
+such as `::error file=app/config.py,line=12,title=Possible secret: github-pat::…`.
+When it runs inside GitHub Actions (`GITHUB_ACTIONS=true`), it also prints them,
+and GitHub shows them on the workflow run and on the pull request's *Files
+changed* view. They need no GitHub Code Security licence, so they work for
+private repositories too.
+
+- Severity mapping: critical/high → `error`, medium → `warning`, low/info → `notice`.
+- One annotation per secret per file, most severe first. Suppressed findings are skipped.
+- GitHub displays only a limited number of annotations per step, so the output
+  is capped (`max_annotations`, default 50) and ends with a notice saying how
+  many were left out.
+- Messages contain only the masked preview and `secret_hash`, the same as the reports.
+- Options under `[reporter.github-annotations]`: `min_severity` (default
+  `"medium"`), `max_annotations`, `emit` (`"auto"`, `"always"`, `"never"`), `filename`.
+- Findings only in history point to files that may no longer exist on the
+  branch. They still appear on the workflow run, but not on the diff.
 
 Organisation scan (`report/` under the scratch directory):
 
@@ -253,7 +276,8 @@ The single-repository pipeline has no heavy dependencies: it needs only `typer`,
 [`examples/secret-scan.yml`](examples/secret-scan.yml). The example checks the
 commits of each push or pull request with `--scope range` and the full history
 weekly. It fails on high or critical findings, writes `report.md` to the job
-summary, and uploads SARIF for public repositories.
+summary, annotates findings on the run and the PR diff, and uploads SARIF for
+public repositories.
 
 ## Extending
 
