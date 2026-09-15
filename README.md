@@ -177,8 +177,18 @@ in JSON configuration files.
 - Transient host failures (fork/thread exhaustion) are retried with backoff.
   Go scanners are capped with `GOMAXPROCS` (`max_procs`, default 4), because on
   many-core shared nodes they otherwise exhaust `ulimit -u`.
-- Everything is created with a `077` umask. Clones of private repositories and
-  the reports are both sensitive.
+- **Permissions.** Clones of private repositories and the reports are both sensitive, so:
+  - everything the CLI creates gets a `077` umask (owner-only);
+  - `org` and `report` remove group/other permissions from the scratch
+    directory itself, even if it already existed, which makes everything
+    inside unreachable to other users;
+  - `scan --out DIR` only warns if an existing `DIR` is shared, since it may be
+    any directory.
+
+  Files you create there yourself (e.g. `… > scratch/run.log`) follow your
+  shell's umask, but stay unreachable while the directory is `drwx------`. Use a
+  scratch directory on a filesystem that honours POSIX permissions, and don't
+  loosen them to share results; share the Markdown report instead.
 
 ## Outputs
 

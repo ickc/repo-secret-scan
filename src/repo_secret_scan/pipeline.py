@@ -44,6 +44,27 @@ def private_dir(path: Path) -> Path:
     return path
 
 
+def is_shared(path: Path) -> bool:
+    """True if group or others have any permission on ``path``."""
+    return bool(path.stat().st_mode & 0o077)
+
+
+def lock_down(path: Path) -> bool:
+    """Ensure a directory dedicated to this tool is accessible only by its owner.
+
+    Creates it if needed and strips group/other permissions from the directory
+    itself, which makes everything inside unreachable to other users. Returns
+    True if permissions had to be changed. Only use on directories the tool
+    owns (e.g. an organisation-scan scratch directory), never on arbitrary paths.
+    """
+    private_dir(path)
+    mode = path.stat().st_mode
+    if mode & 0o077:
+        path.chmod(mode & 0o700)
+        return True
+    return False
+
+
 def build_scanners(config: Config) -> list[Scanner]:
     return [SCANNERS.create(n, config.component_options("scanner", n)) for n in config.scanners]
 

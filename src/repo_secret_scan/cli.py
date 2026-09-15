@@ -14,7 +14,7 @@ from .config import load_config
 from .dataset import Dataset
 from .models import Severity
 from .org import load_results, scan_owner, write_org_reports
-from .pipeline import reprocess, scan_repo
+from .pipeline import is_shared, lock_down, reprocess, scan_repo
 from .reporters import REPORTERS
 from .sources import CommitRange, FullHistory, WorkingTree, resolve_target
 
@@ -72,6 +72,9 @@ def scan(
         scope_obj = WorkingTree() if scope is ScopeChoice.tree else FullHistory()
 
     source = resolve_target(target)
+    if out.is_dir() and is_shared(out):
+        # --out may be any existing directory (even "."), so warn rather than chmod it.
+        _err(f"warning: {out} is accessible to other users; scan results locate credentials (chmod 700 it)")
     result = scan_repo(source, scope_obj, config, workdir=workdir or out / ".work", out_dir=out)
     open_findings = [f for f in result.findings if not f.suppressed]
     typer.echo(f"{result.repo.slug}: {result.status.value}, {len(result.findings)} findings ({len(open_findings)} unsuppressed) -> {out}")
@@ -119,6 +122,8 @@ def report(
     """Rebuild reports from saved results or CSV data without rescanning."""
     config = load_config(config_path)
     if (source / "results").is_dir():
+        if lock_down(source):
+            _err(f"{source} was accessible to other users; restricted it to owner only")
         dataset = Dataset.from_results(reprocess(r, config) for r in load_results(source / "results"))
         out = out or source / "report"
     elif (source / "secrets.csv").is_file():

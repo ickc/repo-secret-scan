@@ -25,7 +25,8 @@ from .config import Config, OrgOptions
 from .dataset import Dataset
 from .models import RepoInfo, RepoScanResult, RunStatus
 from .pipeline import (
-    build_scanners, has_transient_errors, load_result, private_dir, reprocess, result_fingerprint, scan_repo, scanner_versions,
+    build_scanners, has_transient_errors, load_result, lock_down, private_dir, reprocess, result_fingerprint, scan_repo,
+    scanner_versions,
 )
 from .reporters import ORG_REPORTERS
 from .sources import FullHistory, GitHubSource, github_token
@@ -105,7 +106,9 @@ def scan_owner(
     limit: int | None = None,
     on_progress: Callable[[str], None] = print,
 ) -> tuple[Dataset, Path]:
-    scratch = private_dir(scratch)
+    # The scratch directory holds clones of private repositories and reports locating credentials.
+    if lock_down(scratch):
+        on_progress(f"{scratch} was accessible to other users; restricted it to owner only")
     workdir, results_root, report_dir = scratch / "work", scratch / "results", scratch / "report"
     token = github_token()
 
