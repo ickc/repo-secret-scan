@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+.pixi/
+
+# Scan output: locates credentials, never commit it.
+secret-scan-results/
+results/
+report/
+*.sarif
+findings.jsonl
+result.json
