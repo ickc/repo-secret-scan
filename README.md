@@ -212,6 +212,11 @@ changed* view. They need no GitHub Code Security licence, so they work for
 private repositories too.
 
 - Severity mapping: critical/high → `error`, medium → `warning`, low/info → `notice`.
+- Inside GitHub Actions, scanning the workspace checkout (`scan .`) picks up
+  `owner/repo` and visibility from the event, so public repositories get the
+  public-exposure bump in triage. `schedule` events carry no repository, so give
+  the step `GITHUB_TOKEN: ${{ github.token }}` for an API lookup. Elsewhere, pass
+  `--visibility public|private|internal`.
 - One annotation per secret per file, most severe first. Suppressed findings are skipped.
 - GitHub displays only a limited number of annotations per step, so the output
   is capped (`max_annotations`, default 50) and ends with a notice saying how

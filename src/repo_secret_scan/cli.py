@@ -31,6 +31,12 @@ class ScopeChoice(str, Enum):
     tree = "tree"
 
 
+class VisibilityChoice(str, Enum):
+    public = "public"
+    private = "private"
+    internal = "internal"
+
+
 def _err(message: str) -> None:
     typer.echo(message, err=True)
 
@@ -53,6 +59,7 @@ def scan(
     scanner: Annotated[Optional[list[str]], typer.Option("--scanner", "-s", help="Override configured scanners.")] = None,
     fail_on: Annotated[Optional[Severity], typer.Option(help="Exit 1 if an unsuppressed finding is at least this severe.")] = None,
     report_format: Annotated[Optional[list[str]], typer.Option("--format", "-f", help="Add a report format, e.g. github-annotations (repeatable).")] = None,
+    visibility: Annotated[Optional[VisibilityChoice], typer.Option(help="Repository visibility used by triage (public raises severity). Auto-detected inside GitHub Actions.")] = None,
     config_path: ConfigOpt = None,
 ) -> None:
     """Scan one repository."""
@@ -72,6 +79,8 @@ def scan(
         scope_obj = WorkingTree() if scope is ScopeChoice.tree else FullHistory()
 
     source = resolve_target(target)
+    if visibility is not None:
+        source.repo.visibility = visibility.value
     if out.is_dir() and is_shared(out):
         # --out may be any existing directory (even "."), so warn rather than chmod it.
         _err(f"warning: {out} is accessible to other users; scan results locate credentials (chmod 700 it)")

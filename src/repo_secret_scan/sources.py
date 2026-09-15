@@ -7,9 +7,11 @@ GitHub URL) into a :class:`Checkout` that scanners can read.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import shutil
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -98,7 +100,8 @@ class LocalSource:
     @classmethod
     def from_path(cls, path: Path) -> LocalSource:
         path = path.resolve()
-        return cls(path=path, repo=RepoInfo(slug=path.name, visibility="local"))
+        repo = github_actions_repo(path) or RepoInfo(slug=path.name, visibility="local")
+        return cls(path=path, repo=repo)
 
     def materialize(self, workdir: Path) -> Checkout:
         probe = git("rev-parse", "--is-bare-repository", "--absolute-git-dir", cwd=self.path, check=False)
@@ -111,12 +114,69 @@ class LocalSource:
             worktree = Path(git("rev-parse", "--show-toplevel", cwd=self.path).stdout.strip())
         remote = git("remote", "get-url", "origin", git_dir=git_dir_path, check=False).stdout.strip()
         match = _GITHUB_URL_RE.match(remote) if remote else None
-        if match:
+        if match and not self.repo.url:
             self.repo.url = f"https://github.com/{match['owner']}/{match['name']}"
+            if self.repo.slug == self.path.name:
+                self.repo.slug = f"{match['owner']}/{match['name']}"
         return Checkout(repo=self.repo, git_dir=git_dir_path, worktree=worktree, head=_resolve_head(git_dir_path))
 
 
 # --------------------------------------------------------------------------- github
+
+_VISIBILITIES = ("public", "private", "internal")
+
+
+def _visibility_of(repository: dict) -> str | None:
+    if repository.get("visibility") in _VISIBILITIES:
+        return repository["visibility"]
+    if isinstance(repository.get("private"), bool):
+        return "private" if repository["private"] else "public"
+    return None
+
+
+def github_actions_repo(path: Path) -> RepoInfo | None:
+    """Identify the repository when scanning the GitHub Actions workspace checkout.
+
+    Visibility matters for triage (public exposure is worse). It comes from the
+    event payload; ``schedule`` events carry no repository, so fall back to the
+    REST API using ``GITHUB_TOKEN``/``GH_TOKEN`` when the workflow provides one.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return None
+    slug = os.environ.get("GITHUB_REPOSITORY")
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    if not slug or not workspace or Path(workspace).resolve() != path:
+        return None
+
+    repository: dict = {}
+    try:
+        repository = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()).get("repository") or {}
+    except (KeyError, OSError, ValueError, AttributeError):
+        pass
+    visibility = _visibility_of(repository)
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if visibility is None and token:
+        api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+        request = urllib.request.Request(
+            f"{api}/repos/{slug}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "User-Agent": "repo-secret-scan"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                repository = json.load(response)
+            visibility = _visibility_of(repository)
+        except (OSError, ValueError):
+            pass
+
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    return RepoInfo(
+        slug=slug,
+        url=f"{server}/{slug}",
+        visibility=visibility or "unknown",
+        default_branch=repository.get("default_branch"),
+        fork=repository.get("fork"),
+        archived=repository.get("archived"),
+    )
 
 
 def github_token() -> str | None:
