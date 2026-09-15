@@ -47,8 +47,8 @@ either Action, so the Actions' terms don't apply to it.
 | | [gitleaks-action](https://github.com/gitleaks/gitleaks-action) | [trufflehog Action](https://github.com/trufflesecurity/trufflehog#octocat-trufflehog-github-action) | repo-secret-scan |
 |---|---|---|---|
 | Licence | Proprietary EULA since v2 (source-available, no modifications, not usable in a similar product) | AGPL-3.0 | Your choice; calls both CLIs as subprocesses |
-| Licence key | Required for repositories owned by an **organisation**; free key via a sign-up form | None | None |
-| Phones home | Validates the key with `api.keygen.sh` and registers each repository's `owner/name` | Pulls `ghcr.io/trufflesecurity/trufflehog:latest` by default | GitHub API/clone only; binaries downloaded once from GitHub releases |
+| Licence key | Required for repositories owned by an **organisation**; free sign-up form, unlimited repositories | None | None |
+| Phones home | Online key validation (`api.keygen.sh`) exists in the code but has been disabled since late 2024; v2/v3 only check that the secret is non-empty | Pulls `ghcr.io/trufflesecurity/trufflehog:latest` by default | GitHub API/clone only; binaries downloaded once from GitHub releases |
 | Scanners | gitleaks | trufflehog | gitleaks **and** trufflehog, merged into one finding model |
 | Commit scope in CI | Push/PR commits, or full history | Push/PR commits (`base`/`head`) | `--scope range`, `history` or `tree` |
 | Live-credential verification | No | Yes, usually enabled via `--results=verified,unknown` | Off by default; `[scanner.trufflehog] verify = true`, or a custom processor |
@@ -66,10 +66,13 @@ cover most of what PR comments are used for.
 
 Notes on the licences (not legal advice):
 
-- **gitleaks-action's EULA.** Each key registers the repositories that use it
-  and is capped by its tier; past the cap, the Action fails with
-  `TOO_MANY_MACHINES`. Section 2.2 forbids using the Action as part of a product
-  or service with similar functionality. None of this applies when you run the
+- **gitleaks-action's EULA.** The free key currently covers unlimited
+  repositories. The EULA still describes repository-capped tiers, and the
+  Action's code can register each repository online and fail past a cap
+  (`TOO_MANY_MACHINES`), but that check is commented out in current releases.
+  A future release could re-enable it, so pin the Action to a commit SHA.
+  Section 2.2 forbids using the Action as part of a product or service with
+  similar functionality. None of this applies when you run the
   MIT-licensed `gitleaks` binary directly, as this package does. Also note:
   `gitleaks-action@v2` runs on Node 20, which GitHub removes from hosted runners
   on 2026-09-16; use `@v3`.
