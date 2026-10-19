@@ -35,6 +35,7 @@ results that are already on disk and needs no rescan.
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets as _secrets
 from dataclasses import dataclass, field, replace
@@ -122,9 +123,21 @@ class LabelIndex:
         if target is None:
             raise ValueError("no path to save the label index to")
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": INDEX_VERSION, "labels": self.labels}
-        target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        target.chmod(0o600)
+        payload = json.dumps({"version": INDEX_VERSION, "labels": self.labels}, indent=2, sort_keys=True) + "\n"
+        # Create the file owner-only and write into it, rather than writing first and
+        # restricting afterwards: under a permissive umask the gap between the two
+        # leaves the mapping readable, and a reader who opens it in that window keeps
+        # the handle across the chmod. os.replace then swaps it in atomically, so a
+        # concurrent reader sees either the old index or the new one.
+        tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w") as fh:
+                fh.write(payload)
+            os.replace(tmp, target)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         self.path, self.dirty = target, False
         return target
 

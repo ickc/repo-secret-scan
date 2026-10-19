@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import secrets
 import stat
 import string
@@ -237,3 +238,18 @@ def test_an_unredacted_csv_round_trip_is_still_unredacted(tmp_path):
     dataset = Dataset.from_results([_result([_finding(fake_password())])])
     dataset.write_csv(tmp_path)
     assert Dataset.from_csv(tmp_path).redacted is False
+
+
+def test_index_is_never_world_readable_even_under_a_permissive_umask(tmp_path):
+    old = os.umask(0o022)
+    try:
+        index = publish.LabelIndex()
+        index.label_for("deadbeef" * 3)
+        path = index.save(tmp_path / publish.INDEX_FILENAME)
+        assert not stat.S_IMODE(path.stat().st_mode) & 0o077
+        # Rewriting an existing index keeps it owner-only too.
+        index.label_for("cafebabe" * 3)
+        assert not stat.S_IMODE(index.save(path).stat().st_mode) & 0o077
+        assert list(tmp_path.glob(".*tmp")) == []
+    finally:
+        os.umask(old)
