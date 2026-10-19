@@ -46,6 +46,7 @@ from .dataset import Dataset
 INDEX_FILENAME = "secret-labels.json"
 INDEX_VERSION = 1
 ID_PREFIX = "S-"
+CONTEXT_WITHHELD = "…(context withheld)"
 
 _PREVIEW_RE = re.compile(r"^(?P<prefix>.*)…\((?P<length>\d+) chars\)$")
 _PEM_MARKER = "-----BEGIN"
@@ -128,6 +129,26 @@ class LabelIndex:
         return target
 
 
+def redact_context(context: str, old_preview: str, new_preview: str) -> str:
+    """Rewrite a stored context, or withhold it if it cannot be rewritten safely.
+
+    Context was built by masking the secret out of its surrounding line, so it
+    carries the same preview — and then the whole line was truncated to a fixed
+    width. A preview close to the cutoff therefore survives only in part, and
+    substituting the complete preview would silently miss it and leave the first
+    characters of the secret in a report that claims to have none. The plaintext is
+    long gone by then, so a partial mask cannot be rebuilt: withhold the context.
+    """
+    if not context or not old_preview:
+        return context
+    if old_preview in context:
+        return context.replace(old_preview, new_preview)
+    head = old_preview.split("…", 1)[0]
+    if context.endswith("…") or (head and head in context):
+        return CONTEXT_WITHHELD
+    return context
+
+
 def _redact_row(row: dict[str, Any], index: LabelIndex) -> dict[str, Any]:
     out = dict(row)
     old_preview = out.get("preview") or ""
@@ -136,10 +157,8 @@ def _redact_row(row: dict[str, Any], index: LabelIndex) -> dict[str, Any]:
         out["secret_hash"] = index.label_for(out["secret_hash"])
     if "preview" in out:
         out["preview"] = new_preview
-    if out.get("context") and old_preview:
-        # Context was built by masking the secret out of its surrounding line, so it
-        # carries the same prefix and exact length as the preview did.
-        out["context"] = out["context"].replace(old_preview, new_preview)
+    if "context" in out:
+        out["context"] = redact_context(out["context"], old_preview, new_preview)
     if "entropy" in out:
         # Shannon entropy of the value is another numeric fingerprint of it.
         out["entropy"] = ""

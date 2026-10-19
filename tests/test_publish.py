@@ -179,3 +179,39 @@ def test_markdown_labels_the_column_and_explains_the_ids():
     assert "| ID |" in redacted
     assert "opaque id" in redacted
     assert "cannot be used in `secret_hash`" in redacted
+
+
+@pytest.mark.parametrize("padding", [148, 150, 155])
+def test_context_is_withheld_when_a_truncated_preview_survives(padding):
+    password = fake_password()
+    preview = mask_secret(password)
+    # mask_in_text truncates after masking, so a preview near the cutoff is cut
+    # short. How much of it survives depends on where the line is cut, and a
+    # substitution of the whole preview misses every one of these.
+    truncated = mask_in_text("x" * padding + f'KEY = "{password}"', password)
+    assert preview not in truncated
+    assert truncated.endswith("…")
+
+    safe = publish.redact_context(truncated, preview, publish.redact_preview(preview))
+    assert safe == publish.CONTEXT_WITHHELD
+    assert password[:2] not in safe
+
+
+def test_context_without_the_secret_is_left_alone():
+    password = fake_password()
+    context = "ssh_key = load(path) # nothing sensitive on this line"
+    assert publish.redact_context(context, mask_secret(password), "…") == context
+    assert publish.redact_context("", mask_secret(password), "…") == ""
+
+
+def test_redacted_findings_never_keep_a_truncated_preview(tmp_path):
+    password = fake_password()
+    finding = _finding(password)
+    finding.context = mask_in_text("y" * 150 + f'KEY = "{password}"', password)
+    dataset = Dataset.from_results([_result([finding])])
+
+    redacted = publish.redact(dataset, publish.LabelIndex())
+    redacted.write_csv(tmp_path)
+    blob = (tmp_path / "findings.csv").read_text()
+    assert password[:4] not in blob
+    assert publish.CONTEXT_WITHHELD in blob
