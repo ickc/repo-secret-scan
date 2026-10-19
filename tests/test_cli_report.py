@@ -62,6 +62,16 @@ def _config(tmp_path, formats: str) -> str:
     return str(path)
 
 
+def test_redacting_csvs_in_place_is_refused(tmp_path):
+    source = _csv_source(tmp_path, _password())
+    result = runner.invoke(app, ["report", str(source), "--redact"])
+    assert result.exit_code != 0
+    assert "--out" in result.output
+    # The originals are untouched.
+    assert "secret_hash" in (source / "secrets.csv").read_text()
+    assert not list(source.glob("secret-labels.json"))
+
+
 def test_a_shared_directory_never_receives_the_label_index(tmp_path):
     source = _csv_source(tmp_path, _password())
     share = tmp_path / "share"
@@ -69,3 +79,36 @@ def test_a_shared_directory_never_receives_the_label_index(tmp_path):
     assert result.exit_code != 0
     assert "--label-index" in result.output
     assert not (share / "idx.json").exists()
+
+
+def test_redacting_to_a_separate_directory_writes_redacted_csvs(tmp_path):
+    password = _password()
+    source = _csv_source(tmp_path, password)
+    share = tmp_path / "share"
+    index = tmp_path / publish.INDEX_FILENAME
+
+    # Configured formats omit csv; redaction adds it, or the shared directory would
+    # hold redacted pages and no data while the unredacted CSVs stayed behind.
+    result = runner.invoke(app, [
+        "report", str(source), "--redact", "--out", str(share),
+        "--label-index", str(index), "--config", _config(tmp_path, '["markdown"]'),
+    ])
+    assert result.exit_code == 0, result.output
+
+    rows = list(csv.DictReader((share / "data" / "secrets.csv").open()))
+    assert rows and all(r["secret_hash"].startswith(publish.ID_PREFIX) for r in rows)
+    blob = (share / "data" / "secrets.csv").read_text() + (share / "report.md").read_text()
+    assert password not in blob
+    assert password[:4] not in blob
+    assert f"({len(password)} chars)" not in blob
+    assert index.exists()
+    assert not (share / publish.INDEX_FILENAME).exists()
+
+
+def test_without_redact_a_csv_source_still_renders_in_place(tmp_path):
+    source = _csv_source(tmp_path, _password())
+    before = (source / "secrets.csv").read_text()
+    result = runner.invoke(app, ["report", str(source)])
+    assert result.exit_code == 0, result.output
+    assert (source / "secrets.csv").read_text() == before
+    assert (tmp_path / "report" / "report.md").exists()

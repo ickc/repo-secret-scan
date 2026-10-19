@@ -140,8 +140,19 @@ def report(
         out = out or source / "report"
     elif (source / "secrets.csv").is_file():
         dataset = Dataset.from_csv(source)
-        config.report_formats = [f for f in config.report_formats if f != "csv"]
         out = out or source.parent
+        if (out / "data").resolve() == source.resolve():
+            # Rendering CSVs back over the ones just read would rewrite the input.
+            if redact:
+                raise typer.BadParameter(
+                    f"--redact needs --out somewhere other than {source.parent}, so the redacted CSVs are "
+                    "written rather than left as the originals beside a redacted report"
+                )
+            config.report_formats = [f for f in config.report_formats if f != "csv"]
+        elif redact and "csv" not in config.report_formats:
+            # Otherwise the shared directory gets redacted pages and no data at all,
+            # while the unredacted CSVs stay where they were.
+            config.report_formats.append("csv")
     else:
         _err(f"{source} contains neither results/ nor secrets.csv")
         raise typer.Exit(2)
