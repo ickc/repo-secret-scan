@@ -147,6 +147,12 @@ def report(
         raise typer.Exit(2)
     if redact:
         index_path = label_index or source / publish.INDEX_FILENAME
+        if index_path.resolve().is_relative_to(out.resolve()):
+            raise typer.BadParameter(
+                f"the label index would go to {index_path}, inside the report directory {out}. It maps the "
+                "published ids back to hashes, so anyone given the report would get the mapping too — pass "
+                "--label-index pointing outside it."
+            )
         index = publish.LabelIndex.load(index_path)
         dataset = publish.redact(dataset, index)
         saved = index.save(index_path)
