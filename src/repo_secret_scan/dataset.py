@@ -19,6 +19,9 @@ from typing import Any
 from .models import Finding, RepoInfo, RepoScanResult, Severity, Verification
 
 LIST_SEP = ";"
+# Prefix of a published secret id (see ``publish``). A dataset read back from CSV
+# is recognised as redacted by it, since the ids are all a report keeps.
+SECRET_ID_PREFIX = "S-"
 
 REPO_COLUMNS = [
     "repo", "visibility", "fork", "archived", "size_kb", "pushed_at", "status", "scope", "head",
@@ -124,6 +127,12 @@ def _repo_row(result: RepoScanResult, groups: list[SecretGroup]) -> dict[str, An
     }
 
 
+def is_redacted(secrets: Iterable[dict[str, Any]]) -> bool:
+    """Whether every identifier in these rows is a published id rather than a hash."""
+    ids = [s.get("secret_hash") or "" for s in secrets]
+    return bool(ids) and all(i.startswith(SECRET_ID_PREFIX) for i in ids if i)
+
+
 @dataclass
 class Dataset:
     repos: list[dict[str, Any]]
@@ -175,7 +184,13 @@ class Dataset:
             with (data_dir / f"{name}.csv").open(newline="") as fh:
                 return [_coerce(row) for row in csv.DictReader(fh)]
 
-        return cls(repos=read("repos"), secrets=read("secrets"), findings=read("findings"))
+        secrets = read("secrets")
+        return cls(
+            repos=read("repos"),
+            secrets=secrets,
+            findings=read("findings"),
+            redacted=is_redacted(secrets),
+        )
 
     def _tables(self):
         return [

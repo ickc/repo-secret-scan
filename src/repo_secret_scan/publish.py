@@ -41,11 +41,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .dataset import Dataset
+from .dataset import SECRET_ID_PREFIX, Dataset
 
 INDEX_FILENAME = "secret-labels.json"
 INDEX_VERSION = 1
-ID_PREFIX = "S-"
+ID_PREFIX = SECRET_ID_PREFIX
 CONTEXT_WITHHELD = "…(context withheld)"
 
 _PREVIEW_RE = re.compile(r"^(?P<prefix>.*)…\((?P<length>\d+) chars\)$")
@@ -166,7 +166,14 @@ def _redact_row(row: dict[str, Any], index: LabelIndex) -> dict[str, Any]:
 
 
 def redact(dataset: Dataset, index: LabelIndex) -> Dataset:
-    """A copy of ``dataset`` carrying no data derived from the secret values."""
+    """A copy of ``dataset`` carrying no data derived from the secret values.
+
+    Redacting twice would mint new ids for the existing ones and reduce previews
+    that are already bands to ``…(redacted)``, so an already redacted dataset is
+    returned unchanged.
+    """
+    if dataset.redacted:
+        return dataset
     return replace(
         dataset,
         secrets=[_redact_row(s, index) for s in dataset.secrets],

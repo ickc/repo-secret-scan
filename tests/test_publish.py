@@ -215,3 +215,25 @@ def test_redacted_findings_never_keep_a_truncated_preview(tmp_path):
     blob = (tmp_path / "findings.csv").read_text()
     assert password[:4] not in blob
     assert publish.CONTEXT_WITHHELD in blob
+
+
+def test_redaction_survives_a_csv_round_trip(tmp_path):
+    dataset = Dataset.from_results([_result([_finding(fake_password())])])
+    redacted = publish.redact(dataset, publish.LabelIndex())
+    redacted.write_csv(tmp_path)
+
+    reloaded = Dataset.from_csv(tmp_path)
+    assert reloaded.redacted is True
+    assert reloaded.secrets[0]["secret_hash"] == redacted.secrets[0]["secret_hash"]
+    assert "ID" in markdown.render(reloaded, "Rebuilt")
+
+    # Redacting again must not mint new ids or reduce the bands to "(redacted)".
+    again = publish.redact(reloaded, publish.LabelIndex())
+    assert again is reloaded
+    assert again.secrets[0]["preview"] == redacted.secrets[0]["preview"]
+
+
+def test_an_unredacted_csv_round_trip_is_still_unredacted(tmp_path):
+    dataset = Dataset.from_results([_result([_finding(fake_password())])])
+    dataset.write_csv(tmp_path)
+    assert Dataset.from_csv(tmp_path).redacted is False
