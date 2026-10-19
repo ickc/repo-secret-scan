@@ -16,14 +16,17 @@ the secret values themselves:
     The first four characters and the *exact* length of the secret. For a token with
     a fixed vendor prefix those four characters are public knowledge, but for a
     password they are four characters of the password — and the exact length turns a
-    wordlist into a short candidate list.
+    wordlist into a short candidate list. Four characters cannot establish which of
+    those two a value is: a password beginning ``post`` looks exactly like the start
+    of a connection string. Since the detector that fired is already named in the
+    report, the prefix carries no information the reader does not have, so redaction
+    drops it rather than trying to tell the cases apart.
 
 Redaction separates the two jobs that ``secret_hash`` was doing. Correlation stays
 on the operator's machine, in a :class:`LabelIndex` mapping each hash to a random
 id; the report carries only the id. The id is unrelated to the secret, so guessing
 is impossible however weak the secret and whatever the reader knows about the key.
-Previews keep only prefixes that identify a credential *type* (and so are published
-by the vendor anyway) and a bucketed length.
+Previews keep only a bucketed length.
 
 Redaction happens when a report is rendered, not when a scan runs, so it applies to
 results that are already on disk and needs no rescan.
@@ -44,33 +47,6 @@ INDEX_FILENAME = "secret-labels.json"
 INDEX_VERSION = 1
 ID_PREFIX = "S-"
 
-# Prefixes that identify a credential type rather than reveal one. Each is either a
-# vendor-published token marker or a URI scheme, so keeping it tells a reader what
-# kind of thing leaked without giving up any character they could not have guessed.
-PUBLIC_PREFIXES = (
-    # AWS
-    "AKIA", "ASIA", "ABIA", "ACCA",
-    # GitHub
-    "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_",
-    # GitLab
-    "glpat-", "glptt-", "gldt-",
-    # OpenAI / Anthropic
-    "sk-", "sk-proj-", "sk-ant-",
-    # Slack
-    "xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-", "xapp-",
-    # Google
-    "AIza", "ya29.",
-    # Stripe / Square
-    "sk_live_", "pk_live_", "rk_live_", "sk_test_", "pk_test_", "sq0atp-", "sq0csp-",
-    # Assorted vendors
-    "SG.", "key-", "npm_", "hf_", "pypi-", "shpat_", "shpss_", "ATATT", "nvapi-",
-    "lin_api_", "dop_v1_", "doo_v1_", "dor_v1_",
-    # Structured credentials
-    "eyJ", "-----BEGIN",
-    # URI schemes: the scheme is already implied by the detector name
-    "http", "ftp:", "ftps", "jdbc", "mong", "post", "mysq", "redi", "amqp", "smtp", "ldap", "sftp",
-)
-
 _PREVIEW_RE = re.compile(r"^(?P<prefix>.*)…\((?P<length>\d+) chars\)$")
 _PEM_MARKER = "-----BEGIN"
 
@@ -88,24 +64,6 @@ def bucket_length(length: int) -> str:
     return f"{low}+"
 
 
-def public_prefix(prefix: str) -> str:
-    """The part of ``prefix`` that identifies a credential type, or ``""``.
-
-    Only four characters of the secret reach a preview, so a longer marker can
-    never be confirmed outright. A prefix that *extends* a known marker is reported
-    as the marker alone; a prefix that is an initial segment of one is reported as
-    itself, since those characters are the same for every credential of that kind.
-    """
-    if not prefix:
-        return ""
-    extends = [m for m in PUBLIC_PREFIXES if prefix.startswith(m)]
-    if extends:
-        return max(extends, key=len)
-    if any(m.startswith(prefix) for m in PUBLIC_PREFIXES):
-        return prefix
-    return ""
-
-
 def redact_preview(preview: str) -> str:
     """Rewrite a preview so it reveals a credential type but no secret characters."""
     if not preview:
@@ -117,8 +75,10 @@ def redact_preview(preview: str) -> str:
     if not match:
         # An unrecognised shape may embed anything; say nothing about it.
         return "…(redacted)"
-    kept = public_prefix(match["prefix"])
-    return f"{kept}…({bucket_length(int(match['length']))} chars)"
+    # The prefix goes whatever it looks like: four characters cannot show whether
+    # they are a vendor marker or the opening of a password, and the detector name
+    # already tells the reader what kind of credential this is.
+    return f"…({bucket_length(int(match['length']))} chars)"
 
 
 @dataclass

@@ -257,11 +257,12 @@ repo-secret-scan report /path/to/scratch --redact --out /path/to/share
 - Each distinct secret gets a random id (`S-1a2b3c4d`) in place of its hash. The
   id is unrelated to the value, so no amount of guessing gets anywhere, whatever
   the reader knows about the key.
-- Previews keep only prefixes that identify a credential *type* — vendor markers
-  such as `ghp_` or `AKIA`, and URI schemes — plus a bucketed length, so
-  `ghp_…(40-47 chars)` rather than four characters of a password and its exact
-  length. A PEM `-----BEGIN` header is kept; an unrecognised preview becomes
-  `…(redacted)`.
+- Previews keep only a bucketed length, so `…(40-47 chars)` rather than four
+  characters of the secret and its exact length. The prefix goes whatever it
+  looks like: four characters cannot show whether they are a vendor marker or
+  the opening of a password, and the detector that fired is already named in the
+  report. A PEM `-----BEGIN` header is kept, since that line is a fixed public
+  armour header; an unrecognised preview becomes `…(redacted)`.
 - Entropy is dropped, and masked `context` inherits the trimmed preview.
 
 The id-to-hash mapping is written to `secret-labels.json` (mode `600`) beside the

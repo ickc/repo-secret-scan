@@ -62,38 +62,32 @@ def test_bucket_length_reports_a_range_not_an_exact_value():
     assert publish.bucket_length(5000) == "1024+"
 
 
-def test_preview_keeps_a_vendor_prefix_but_no_secret_characters():
+def test_preview_drops_every_prefix_whatever_it_looks_like():
+    # A vendor marker and a password opening are indistinguishable in four
+    # characters, and the detector name already gives the credential type.
     token = fake_github_pat()
-    redacted = publish.redact_preview(mask_secret(token))
-    assert redacted.startswith("ghp_")
-    assert token[4:] not in redacted
-    # The length is reported as a band, so it no longer pins the candidate list.
-    assert redacted == "ghp_…(40-47 chars)"
+    assert publish.redact_preview(mask_secret(token)) == "…(40-47 chars)"
+    assert "ghp" not in publish.redact_preview(mask_secret(token))
 
     key_id = fake_aws_key_id()
-    assert publish.redact_preview(mask_secret(key_id)).startswith("AKIA")
+    assert "AKIA" not in publish.redact_preview(mask_secret(key_id))
 
-
-def test_preview_drops_a_prefix_that_is_secret_material():
     password = fake_password()
     redacted = publish.redact_preview(mask_secret(password))
     assert redacted == "…(40-47 chars)"
     assert password[:4] not in redacted
 
 
+def test_preview_drops_a_prefix_that_collides_with_a_uri_scheme():
+    # "post" is the start of postgres:// and also of plenty of passwords.
+    secret = "post" + "gresqlpassword0123456789abcdef"
+    assert publish.redact_preview(mask_secret(secret)) == "…(32-39 chars)"
+
+
 def test_preview_keeps_a_pem_header_and_rejects_unknown_shapes():
     assert publish.redact_preview("-----BEGIN RSA PRIVATE KEY-----") == "-----BEGIN RSA PRIVATE KEY-----"
     assert publish.redact_preview("whatever this is") == "…(redacted)"
     assert publish.redact_preview("") == ""
-
-
-def test_public_prefix_accepts_an_initial_segment_of_a_longer_marker():
-    # Only four characters reach a preview, so a longer marker can never be seen whole.
-    assert publish.public_prefix("gith") == "gith"
-    assert publish.public_prefix("glpa") == "glpa"
-    assert publish.public_prefix("glpat-") == "glpat-"
-    # A prefix matching no marker at all is secret material and goes.
-    assert publish.public_prefix("zqx7") == ""
 
 
 def test_labels_are_stable_unrelated_to_the_hash_and_persist(tmp_path):

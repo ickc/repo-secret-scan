@@ -212,7 +212,7 @@ class DashboardReporter:
             generated=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             redaction_note=(
                 '<p class="sub">Secrets are identified by an opaque id, not by a hash of the value, and previews '
-                'show only credential-type prefixes and a bucketed length.</p>' if dataset.redacted else ""
+                'show only a bucketed length.</p>' if dataset.redacted else ""
             ),
             tiles="".join(f'<div class="tile"><div class="v">{v}</div><div class="k">{k}</div></div>' for v, k in tiles),
             charts="".join(charts),

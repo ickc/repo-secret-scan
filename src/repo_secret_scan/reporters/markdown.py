@@ -42,10 +42,9 @@ def render(dataset: Dataset, title: str, max_rows: int = 300) -> str:
     out = [f"# {title}", "", f"Generated {now}. **Confidential** — this report locates live credentials; do not publish it.", ""]
     if dataset.redacted:
         out += [
-            "Each secret is identified by an opaque id, not by a hash of its value, and previews show only "
-            "credential-type prefixes and a bucketed length. Nothing in this report is derived from a secret "
-            "value, so candidate secrets cannot be tested against it. The id-to-hash mapping is held with the "
-            "scan results.",
+            "Each secret is identified by an opaque id, not by a hash of its value, and previews show only a "
+            "bucketed length. Nothing in this report is derived from a secret value, so candidate secrets "
+            "cannot be tested against it. The id-to-hash mapping is held with the scan results.",
             "",
         ]
     out += ["## Summary", ""]
