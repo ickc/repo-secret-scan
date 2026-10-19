@@ -9,6 +9,7 @@ from typing import Annotated, Optional
 
 import typer
 
+from . import publish
 from . import tools as tools_mod
 from .config import load_config
 from .dataset import Dataset
@@ -126,6 +127,8 @@ def report(
     source: Annotated[Path, typer.Argument(help="An org scratch dir (with results/) or a report data/ dir of CSVs.", exists=True, file_okay=False)],
     out: Annotated[Optional[Path], typer.Option("--out", "-o", help="Report directory (default: <scratch>/report).")] = None,
     title: Annotated[str, typer.Option(help="Report title.")] = "Secret scan",
+    redact: Annotated[bool, typer.Option("--redact/--no-redact", help="Replace secret hashes with opaque ids and trim previews, for a report that will be shared.")] = False,
+    label_index: Annotated[Optional[Path], typer.Option("--label-index", help="Where the id-to-hash mapping lives (default: <source>/secret-labels.json). Keep it with the results, not the report.")] = None,
     config_path: ConfigOpt = None,
 ) -> None:
     """Rebuild reports from saved results or CSV data without rescanning."""
@@ -142,6 +145,12 @@ def report(
     else:
         _err(f"{source} contains neither results/ nor secrets.csv")
         raise typer.Exit(2)
+    if redact:
+        index_path = label_index or source / publish.INDEX_FILENAME
+        index = publish.LabelIndex.load(index_path)
+        dataset = publish.redact(dataset, index)
+        saved = index.save(index_path)
+        _err(f"{len(index.labels)} secret ids in {saved} — keep this with the results, not the report")
     write_org_reports(dataset, out, config, title=title, on_progress=_err)
     typer.echo(f"reports written to {out}")
 

@@ -40,6 +40,14 @@ def render(dataset: Dataset, title: str, max_rows: int = 300) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     out = [f"# {title}", "", f"Generated {now}. **Confidential** — this report locates live credentials; do not publish it.", ""]
+    if dataset.redacted:
+        out += [
+            "Each secret is identified by an opaque id, not by a hash of its value, and previews show only "
+            "credential-type prefixes and a bucketed length. Nothing in this report is derived from a secret "
+            "value, so candidate secrets cannot be tested against it. The id-to-hash mapping is held with the "
+            "scan results.",
+            "",
+        ]
     out += ["## Summary", ""]
     out += _table(
         ["Metric", "Value"],
@@ -75,7 +83,8 @@ def render(dataset: Dataset, title: str, max_rows: int = 300) -> str:
             ]
             for s in actionable[:max_rows]
         ]
-        out += _table(["Severity", "Repo", "Detector", "Preview", "In HEAD", "Hits", "Where", "Why", "Hash"], rows)
+        id_header = "ID" if dataset.redacted else "Hash"
+        out += _table(["Severity", "Repo", "Detector", "Preview", "In HEAD", "Hits", "Where", "Why", id_header], rows)
         if len(actionable) > max_rows:
             out += ["", f"_{len(actionable) - max_rows} more rows in `data/secrets.csv`._"]
     else:
@@ -117,6 +126,12 @@ def render(dataset: Dataset, title: str, max_rows: int = 300) -> str:
         "```toml", "[[ignore]]", 'secret_hash = "<hash from this report>"', 'reason = "test fixture, not a real key"', "",
         "[[ignore]]", 'path = "tests/fixtures/*"', 'rule = "generic-api-key"', 'reason = "synthetic data"', "```", "",
     ]
+    if dataset.redacted:
+        out += [
+            "The ids above are not hashes, so they cannot be used in `secret_hash`. Quote the id and whoever holds "
+            "the scan results can look the hash up, or match on `path` and `rule` instead.",
+            "",
+        ]
     return "\n".join(out)
 
 

@@ -124,6 +124,7 @@ td code {{ font-size:12px; white-space:nowrap; }} td.path {{ max-width:360px; ov
 </style></head><body><main>
 <h1>{title}</h1>
 <p class="sub">Generated {generated}. <span class="warn">Confidential</span> — locates credentials; do not publish.</p>
+{redaction_note}
 <div class="tiles">{tiles}</div>
 <div class="charts">{charts}</div>
 <div class="filters">
@@ -138,7 +139,7 @@ td code {{ font-size:12px; white-space:nowrap; }} td.path {{ max-width:360px; ov
 </div>
 <div class="tablewrap"><table><thead><tr>
 <th data-k="severity">Severity</th><th data-k="repo">Repo</th><th data-k="rules">Detectors</th><th data-k="preview">Preview</th>
-<th data-k="in_head">In HEAD</th><th data-k="occurrences">Hits</th><th data-k="location">Where</th><th data-k="first_seen">First seen</th><th data-k="secret_hash">Hash</th>
+<th data-k="in_head">In HEAD</th><th data-k="occurrences">Hits</th><th data-k="location">Where</th><th data-k="first_seen">First seen</th><th data-k="secret_hash">{id_header}</th>
 </tr></thead><tbody id="rows"></tbody></table></div>
 </main>
 <script>
@@ -207,7 +208,12 @@ class DashboardReporter:
         data = json.dumps([{k: s[k] for k in columns} for s in dataset.secrets]).replace("</", "<\\/")
         page = _PAGE.format(
             title=html.escape(title),
+            id_header="ID" if dataset.redacted else "Hash",
             generated=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            redaction_note=(
+                '<p class="sub">Secrets are identified by an opaque id, not by a hash of the value, and previews '
+                'show only credential-type prefixes and a bucketed length.</p>' if dataset.redacted else ""
+            ),
             tiles="".join(f'<div class="tile"><div class="v">{v}</div><div class="k">{k}</div></div>' for v, k in tiles),
             charts="".join(charts),
             data=data,

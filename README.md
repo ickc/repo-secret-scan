@@ -25,6 +25,9 @@ repo-secret-scan org my-org --scratch /path/to/scratch --config secret-scan.toml
 
 # rebuild reports (e.g. after changing triage settings) without rescanning
 repo-secret-scan report /path/to/scratch --config secret-scan.toml
+
+# a report to share: opaque ids instead of secret hashes, trimmed previews
+repo-secret-scan report /path/to/scratch --redact --out /path/to/share
 ```
 
 GitHub access uses `GH_TOKEN`/`GITHUB_TOKEN`, falling back to `gh auth token`.
@@ -235,6 +238,43 @@ Organisation scan (`report/` under the scratch directory):
 - `dashboard.html` — self-contained Plotly dashboard with a filterable table
   (needs the `dashboard` extra)
 
+### Sharing a report (`--redact`)
+
+A report has to reach the people who will rotate the credentials, so it travels
+further than the results it came from. Two of its columns are derived from the
+secret values: `secret_hash`, which is only as unguessable as the hash key is
+secret, and `preview`, which carries the first four characters and the exact
+length. Together they let a reader test candidate secrets offline, one hash per
+guess — cheap for a human-chosen password inside a connection string, hopeless
+for a random API token.
+
+`--redact` renders a report that holds nothing derived from a secret value:
+
+```bash
+repo-secret-scan report /path/to/scratch --redact --out /path/to/share
+```
+
+- Each distinct secret gets a random id (`S-1a2b3c4d`) in place of its hash. The
+  id is unrelated to the value, so no amount of guessing gets anywhere, whatever
+  the reader knows about the key.
+- Previews keep only prefixes that identify a credential *type* — vendor markers
+  such as `ghp_` or `AKIA`, and URI schemes — plus a bucketed length, so
+  `ghp_…(40-47 chars)` rather than four characters of a password and its exact
+  length. A PEM `-----BEGIN` header is kept; an unrecognised preview becomes
+  `…(redacted)`.
+- Entropy is dropped, and masked `context` inherits the trimmed preview.
+
+The id-to-hash mapping is written to `secret-labels.json` (mode `600`) beside the
+results, not in the report directory. Keep it: it is what makes an id stable
+across runs, so the same secret keeps the same id in next month's report. It
+contains no plaintext. Losing it only renumbers the ids.
+
+Because it applies when a report is rendered rather than when a scan runs,
+`--redact` works on results already on disk, with no rescan.
+
+Ids cannot be used in `secret_hash` ignore entries — they aren't hashes. Whoever
+holds the results can map an id back, or an entry can match on `path` and `rule`.
+
 ## Configuration
 
 All keys, with defaults:
@@ -285,7 +325,12 @@ reason = "teaching material"
 
 Set `REPO_SECRET_SCAN_HASH_KEY` to a private value so that published hashes (for
 example in a public repository's ignore file) can't be checked against guessed
-secrets. Use the same key everywhere so hashes stay comparable.
+secrets. Use the same key everywhere so hashes stay comparable; changing it
+renames every hash, and only takes effect on a fresh scan, because hashes are
+computed while the secret is in memory and the value is never stored. For a
+report that will be shared, prefer `--redact` (see *Sharing a report*): it
+publishes ids that are unrelated to the values, so it needs no key to stay
+secret, and it can be applied to results that have already been scanned.
 
 ## Using it as a GitHub Action in each repository
 

@@ -129,6 +129,9 @@ class Dataset:
     repos: list[dict[str, Any]]
     secrets: list[dict[str, Any]]
     findings: list[dict[str, Any]]
+    # Set by ``publish.redact``: ``secret_hash`` holds an opaque id rather than a
+    # hash, and previews and entropies have been trimmed. Reporters say so.
+    redacted: bool = False
 
     @classmethod
     def from_results(cls, results: Iterable[RepoScanResult]) -> Dataset:
