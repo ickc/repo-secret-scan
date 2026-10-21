@@ -5,7 +5,7 @@ from pathlib import Path
 
 from repo_secret_scan.models import Finding, Location, RepoInfo, Severity, Verification
 from repo_secret_scan.processors import (
-    CrossScanner, IgnoreFile, InHead, PathTags, Placeholder, ProcessContext, Triage,
+    CrossScanner, EmbeddedData, IgnoreFile, InHead, PathTags, Placeholder, ProcessContext, Triage,
 )
 from repo_secret_scan.sources import Checkout, FullHistory, LocalSource, WorkingTree
 
@@ -56,6 +56,28 @@ def test_placeholder_lowers_severity():
     Triage().process([finding], _ctx("public"))
     assert finding.severity is Severity.INFO
     assert "placeholder (-3)" in finding.extra["severity_reasons"]
+
+
+def test_embedded_data_tags_matches_inside_data_uris_only(tmp_path: Path):
+    b64 = string.ascii_letters + string.digits + "+/"
+    inside, both, outside = (_rand(b64, 40) for _ in range(3))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    image = _rand(b64, 200) + inside + _rand(b64, 200) + both + _rand(b64, 50)
+    (repo / "report.html").write_text(f'<p><img src="data:image/png;base64,{image}" /></p>\n<p>{both}</p>\n')
+    (repo / "notes.txt").write_text(f"{outside}\n")
+    git(repo, "add", ".")
+    git(repo, "-c", "user.email=dev@example.com", "-c", "user.name=Dev", "commit", "-qm", "add")
+    commit = git(repo, "rev-parse", "HEAD")
+    checkout = LocalSource.from_path(repo).materialize(tmp_path)
+
+    def at(secret: str, path: str) -> Finding:
+        return Finding.create(scanner="trufflehog", rule="Box", secret=secret, location=Location(path=path, line=1, commit=commit))
+
+    findings = [at(inside, "report.html"), at(both, "report.html"), at(outside, "notes.txt")]
+    EmbeddedData().process(findings, ProcessContext(checkout, FullHistory()))
+    assert [("embedded-data" in f.tags) for f in findings] == [True, False, False]
 
 
 def test_path_tags():

@@ -144,6 +144,60 @@ class Placeholder:
         return findings
 
 
+_DATA_URI = re.compile(r"data:[\w.+-]+/[\w.+-]+(?:;[\w.+-]+=[\w.+-]+)*;base64,[A-Za-z0-9+/=]+")
+
+
+@PROCESSORS.register("embedded-data")
+@dataclass
+class EmbeddedData:
+    """Tag secrets that occur only inside base64 ``data:`` URIs.
+
+    Rendered HTML embeds images and fonts as data URIs. Keyword-proximity
+    detectors match the keyword case-insensitively, so a long enough base64 run
+    spells it somewhere and is followed by a token-shaped tail. Reads each file
+    at the commit the finding came from, so it runs at scan time.
+    """
+
+    offline: ClassVar[bool] = False
+
+    def process(self, findings: list[Finding], ctx: ProcessContext) -> list[Finding]:
+        by_file: dict[tuple[str | None, str], list[Finding]] = defaultdict(list)
+        for f in findings:
+            if f.secret and f.location.path:
+                by_file[(f.location.commit, f.location.path)].append(f)
+        for (commit, path), fs in by_file.items():
+            text = _read_file(ctx.checkout, commit, path)
+            if not text or "base64," not in text:
+                continue
+            spans = [m.span() for m in _DATA_URI.finditer(text)]
+            for f in fs:
+                if spans and _only_inside(text, _grep_line(f.secret), spans):
+                    add_content_tag(f, "embedded-data")
+        return findings
+
+
+def _read_file(checkout: Checkout, commit: str | None, path: str) -> str | None:
+    if commit and checkout.git_dir is not None:
+        result = git("show", f"{commit}:{path}", git_dir=checkout.git_dir, check=False)
+        return result.stdout if result.returncode == 0 else None
+    if checkout.worktree is not None and (checkout.worktree / path).is_file():
+        return (checkout.worktree / path).read_text(errors="replace")
+    return None
+
+
+def _only_inside(text: str, needle: str, spans: list[tuple[int, int]]) -> bool:
+    """Whether ``needle`` occurs in ``text`` and every occurrence lies within one of ``spans``."""
+    start = text.find(needle)
+    if start < 0:
+        return False
+    while start >= 0:
+        end = start + len(needle)
+        if not any(s <= start and end <= e for s, e in spans):
+            return False
+        start = text.find(needle, start + 1)
+    return True
+
+
 DEFAULT_PATH_TAGS: dict[str, list[str]] = {
     "test": [r"(^|/)(tests?|testing|spec|__tests__|fixtures?|testdata|mocks?)(/|$)", r"(^|/)test_[^/]*$", r"_test\.[^/]+$"],
     "example": [r"(^|/)(examples?|samples?|demo|tutorials?)(/|$)", r"\.(example|sample|template|dist)$", r"(^|/)\.env\.(example|sample|template)$"],
@@ -278,7 +332,7 @@ DEFAULT_GENERIC_RULES = ["generic-*", "*entropy*", "jwt"]
 # (notebook outputs, checksums, compiled files). Observed on a real organisation scan.
 DEFAULT_WEAK_RULES = ["box", "tly", "sirv", "unifyid", "juro", "alchemy", "eightxeight", "wit", "sumologic-access-id"]
 DEFAULT_TAG_WEIGHTS = {
-    "placeholder": -3,
+    "placeholder": -3, "embedded-data": -2,
     "test": -1, "example": -1, "docs": -1, "data": -1, "notebook": -1, "rendered": -1,
     "lockfile": -2, "vendored": -2, "generated": -2, "binary": -2, "checksum": -2,
     "multi-scanner": 1,
