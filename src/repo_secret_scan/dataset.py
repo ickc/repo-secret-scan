@@ -32,10 +32,12 @@ SECRET_COLUMNS = [
     "severity", "repo", "visibility", "secret_hash", "preview", "rules", "scanners", "in_head",
     "suppressed", "suppression_reason", "verification", "occurrences", "commits", "location", "paths", "path_count",
     "first_seen", "last_seen", "authors", "tags", "severity_reasons", "shared_with_repos", "link",
+    "head_location", "head_link",
 ]
 FINDING_COLUMNS = [
     "severity", "repo", "visibility", "secret_hash", "scanner", "rule", "preview", "in_head", "suppressed",
     "verification", "path", "line", "commit", "commit_date", "author_email", "entropy", "tags", "context", "link",
+    "head_location", "head_link",
 ]
 
 _VERIFICATION_ORDER = [Verification.LIVE, Verification.ERROR, Verification.UNKNOWN, Verification.INVALID]
@@ -48,6 +50,19 @@ def blob_link(repo: RepoInfo, finding: Finding, fallback_ref: str | None) -> str
         return ""
     anchor = f"#L{finding.location.line}" if finding.location.line else ""
     return f"{base}/blob/{ref}/{finding.location.path}{anchor}"
+
+
+def head_location(finding: Finding) -> str:
+    """Where the secret is on the default branch, which may differ from where it was found."""
+    where = finding.extra.get("head_location")
+    return f"{where['path']}:{where['line']}" if where else ""
+
+
+def head_link(repo: RepoInfo, finding: Finding, head: str | None) -> str:
+    where = finding.extra.get("head_location")
+    if not repo.html_url or not head or not where:
+        return ""
+    return f"{repo.html_url}/blob/{head}/{where['path']}#L{where['line']}"
 
 
 def _join(values: Iterable[Any], limit: int | None = None) -> str:
@@ -101,6 +116,8 @@ class SecretGroup:
             "severity_reasons": _join(lead.extra.get("severity_reasons", [])),
             "shared_with_repos": shared_with,
             "link": blob_link(self.repo, lead, self.head),
+            "head_location": head_location(lead),
+            "head_link": head_link(self.repo, lead, self.head),
         }
 
 
@@ -165,6 +182,7 @@ class Dataset:
                         "commit_date": f.location.commit_date, "author_email": f.location.author_email,
                         "entropy": f.entropy, "tags": _join(sorted(f.tags)), "context": f.context,
                         "link": blob_link(r.repo, f, r.head),
+                        "head_location": head_location(f), "head_link": head_link(r.repo, f, r.head),
                     })
         rank = {s.value: s.rank for s in Severity}
         secrets.sort(key=lambda s: (s["suppressed"], rank[s["severity"]], not s["in_head"], s["repo"].lower()))

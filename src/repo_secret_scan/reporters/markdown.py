@@ -28,7 +28,15 @@ def _location(secret: dict[str, Any]) -> str:
     label = f"`{_cell(secret['location'])}`"
     if secret["path_count"] > 1:
         label += f" (+{secret['path_count'] - 1})"
-    return f"[{label}]({secret['link']})" if secret["link"] else label
+    label = f"[{label}]({secret['link']})" if secret["link"] else label
+    # Scanners give the line in the commit that added the secret; say where it is now if that moved.
+    now = secret.get("head_location") or ""
+    if now and now != secret["location"]:
+        now = f"`{_cell(now)}`"
+        if secret.get("head_link"):
+            now = f"[{now}]({secret['head_link']})"
+        label += f"; now {now}"
+    return label
 
 
 def render(dataset: Dataset, title: str, max_rows: int = 300) -> str:

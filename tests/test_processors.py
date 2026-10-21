@@ -27,6 +27,30 @@ def test_in_head_distinguishes_history_from_current(fixture_repo, tmp_path: Path
     assert [f.in_head for f in findings] == [False, True]
 
 
+def test_in_head_records_where_the_secret_is_now(tmp_path: Path):
+    token = fake_github_pat()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    commit = ["-c", "user.email=dev@example.com", "-c", "user.name=Dev", "commit", "-qm", "edit"]
+    (repo / "app.py").write_text(f'TOKEN = "{token}"\n')
+    git(repo, "add", ".")
+    git(repo, *commit)
+    introduced = git(repo, "rev-parse", "HEAD")
+    (repo / "app.py").write_text(f'import os\n\nTOKEN = "{token}"\n')
+    (repo / "copy.py").write_text(f'TOKEN = "{token}"\n')
+    git(repo, "add", ".")
+    git(repo, *commit)
+    checkout = LocalSource.from_path(repo).materialize(tmp_path)
+
+    finding = Finding.create(
+        scanner="gitleaks", rule="github-pat", secret=token, location=Location(path="app.py", line=1, commit=introduced),
+    )
+    InHead().process([finding], ProcessContext(checkout, FullHistory()))
+    assert finding.in_head is True
+    assert finding.extra["head_location"] == {"path": "app.py", "line": 3}
+
+
 def test_in_head_is_true_for_working_tree_scope():
     findings = InHead().process([_finding(fake_github_pat())], _ctx(scope=WorkingTree()))
     assert findings[0].in_head is True

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 from ._proc import git
-from .models import Finding, Severity, Verification
+from .models import Finding, Location, Severity, Verification
 from .registry import Registry
 from .sources import Checkout, Scope, WorkingTree
 
@@ -50,7 +50,12 @@ def _grep_line(secret: str) -> str:
 @PROCESSORS.register("in-head")
 @dataclass
 class InHead:
-    """Flag whether each secret is still present in the default branch tip."""
+    """Flag whether each secret is still present in the default branch tip.
+
+    Also records where it is there, in ``extra["head_location"]``: scanners
+    report the line in the commit that introduced a secret, which drifts as the
+    file changes.
+    """
 
     offline: ClassVar[bool] = False
     batch_size: int = 500
@@ -64,23 +69,36 @@ class InHead:
         if checkout.git_dir is None or checkout.head is None:
             return findings
         needles = {_grep_line(f.secret) for f in findings if f.secret}
-        present: set[str] = set()
+        present: dict[str, list[tuple[str, int]]] = defaultdict(list)
         ordered = sorted(needles)
         for i in range(0, len(ordered), self.batch_size):
             batch = ordered[i : i + self.batch_size]
             # Patterns go through stdin so secrets never appear in the process list.
             result = git(
-                "grep", "--no-color", "-o", "-h", "-I", "-F", "-f", "-", checkout.head, "--",
+                "grep", "--no-color", "-o", "-n", "-z", "-I", "-F", "-f", "-", checkout.head, "--",
                 git_dir=checkout.git_dir, input="\n".join(batch) + "\n", check=False,
             )
             if result.returncode not in (0, 1):  # 1 just means "no match"
                 raise RuntimeError(f"git grep failed ({result.returncode}): {result.stderr.strip()[:200]}")
-            found = set(result.stdout.splitlines())
-            present.update(n for n in batch if n in found)
+            # -z: "<head>:<path>\0<line>\0<match>" per match.
+            for row in result.stdout.splitlines():
+                if row.count("\0") < 2:  # a path containing a newline
+                    continue
+                name, line, match = row.split("\0", 2)
+                present[match].append((name.removeprefix(f"{checkout.head}:"), int(line)))
         for f in findings:
             if f.secret:
-                f.in_head = _grep_line(f.secret) in present
+                places = present.get(_grep_line(f.secret), [])
+                f.in_head = bool(places)
+                if places:
+                    path, line = _nearest(places, f.location)
+                    f.extra["head_location"] = {"path": path, "line": line}
         return findings
+
+
+def _nearest(places: list[tuple[str, int]], location: Location) -> tuple[str, int]:
+    """The occurrence most likely to be the reported one: same file, then closest line."""
+    return min(places, key=lambda p: (p[0] != location.path, abs(p[1] - (location.line or 0)), p))
 
 
 CONTENT_TAGS_KEY = "content_tags"
