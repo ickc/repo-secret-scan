@@ -4,7 +4,7 @@ Example::
 
     [scan]
     scanners = ["gitleaks", "trufflehog"]
-    processors = ["in-head", "path-tags", "cross-scanner", "ignore-file", "triage"]
+    processors = ["in-head", "placeholder", "embedded-data", "path-tags", "cross-scanner", "ignore-file", "triage"]
     reporters = ["markdown", "sarif"]  # findings.jsonl + result.json are always written
 
     [scanner.trufflehog]
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_SCANNERS = ["gitleaks", "trufflehog"]
-DEFAULT_PROCESSORS = ["in-head", "path-tags", "cross-scanner", "ignore-file", "triage"]
+DEFAULT_PROCESSORS = ["in-head", "placeholder", "embedded-data", "path-tags", "cross-scanner", "ignore-file", "triage"]
 DEFAULT_REPORTERS = ["markdown", "sarif"]
 DEFAULT_ORG_REPORTS = ["csv", "markdown", "dashboard"]
 # Scanner options that affect speed or resource use but not findings.

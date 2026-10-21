@@ -59,6 +59,7 @@ def test_reprocess_applies_current_policy_but_keeps_scan_facts():
         location=Location(path="notebooks/x.ipynb"), in_head=True, suppressed=True, tags={"stale-tag"},
     )
     finding.secret = None
+    finding.extra["content_tags"] = ["placeholder"]
     result = RepoScanResult(
         repo=RepoInfo("o/r", visibility="private"), scope="history", head="abc", started_at="", finished_at="",
         status=RunStatus.OK, config_fingerprint="", findings=[finding],
@@ -66,9 +67,9 @@ def test_reprocess_applies_current_policy_but_keeps_scan_facts():
     config = Config()
     config.options["processor"] = {"triage": {"tag_weights": {}}}
     (after,) = reprocess(result, config).findings
-    assert after.tags == {"notebook"}
+    assert after.tags == {"notebook", "placeholder"}, "tags read from the secret survive, stale ones do not"
     assert after.in_head is True and after.suppressed is True
-    assert after.severity is Severity.CRITICAL  # 4 high-confidence + 1 in HEAD, notebook weight disabled
+    assert after.severity is Severity.CRITICAL  # 4 high-confidence + 1 in HEAD, tag weights disabled
 
 
 def test_transient_error_detection():

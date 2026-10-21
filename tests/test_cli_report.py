@@ -112,3 +112,28 @@ def test_without_redact_a_csv_source_still_renders_in_place(tmp_path):
     assert result.exit_code == 0, result.output
     assert (source / "secrets.csv").read_text() == before
     assert (tmp_path / "report" / "report.md").exists()
+
+
+def test_reports_say_where_a_moved_secret_is_now():
+    from repo_secret_scan.reporters.markdown import render
+
+    unmoved = _dataset(_password())
+    assert unmoved.secrets[0]["head_location"] == ""
+    assert "; now" not in render(unmoved, "t")
+
+    secret = _password()
+    finding = Finding.create(
+        scanner="gitleaks", rule="generic-api-key", secret=secret,
+        location=Location(path="src/config.py", line=7, commit="a" * 40), severity=Severity.CRITICAL,
+    )
+    finding.extra["head_location"] = {"path": "src/config.py", "line": 12}
+    result = RepoScanResult(
+        repo=RepoInfo(slug="my-org/some-repo", url="https://github.com/my-org/some-repo", visibility="public"),
+        scope="history", head="0" * 40, started_at="", finished_at="", status=RunStatus.OK,
+        config_fingerprint="", findings=[finding],
+    )
+    (row,) = Dataset.from_results([result]).secrets
+    assert row["head_location"] == "src/config.py:12"
+    assert row["head_link"] == "https://github.com/my-org/some-repo/blob/" + "0" * 40 + "/src/config.py#L12"
+    text = render(Dataset.from_results([result]), "t")
+    assert "now [`src/config.py:12`](" + row["head_link"] + ")" in text
