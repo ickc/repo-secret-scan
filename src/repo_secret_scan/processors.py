@@ -83,6 +83,67 @@ class InHead:
         return findings
 
 
+CONTENT_TAGS_KEY = "content_tags"
+
+
+def add_content_tag(finding: Finding, tag: str) -> None:
+    """Tag a fact read from the secret or the repository.
+
+    Such facts cannot be recomputed from stored findings, so they are also kept
+    in ``extra``, from which ``reprocess`` restores them.
+    """
+    finding.tags.add(tag)
+    stored = finding.extra.setdefault(CONTENT_TAGS_KEY, [])
+    if tag not in stored:
+        stored.append(tag)
+
+
+# Values that stand in for a credential in documentation and commented-out commands.
+DEFAULT_PLACEHOLDER_WORDS = [
+    "username", "user", "user_name", "login", "password", "passwd", "pass", "pwd", "secret", "token", "apikey",
+    "api_key", "key", "changeme", "change_me", "example", "placeholder", "dummy", "someone", "foo", "bar",
+]
+# Reserved for documentation (RFC 2606 / RFC 6761); credentials for them cannot be real.
+DEFAULT_PLACEHOLDER_HOSTS = ["example.com", "example.net", "example.org", "*.example", "*.test", "*.invalid"]
+_URI_USERINFO = re.compile(r"^[a-z][a-z0-9+.-]*://([^:/@\s]*):([^@/\s]*)@([^/:?#\s]+)", re.IGNORECASE)
+_TEMPLATE = re.compile(r"^(<[^<>]+>|\$\{[^{}]+\}|\{\{[^{}]+\}\}|%[^%]+%|x{6,}|\*{6,})$", re.IGNORECASE)
+
+
+@PROCESSORS.register("placeholder")
+@dataclass
+class Placeholder:
+    """Tag secrets that are documentation placeholders rather than credentials.
+
+    Covers URIs whose user and password are both placeholder words
+    (``ftp://username:password@host``) or whose host is reserved for
+    documentation, and whole values such as ``<token>``, ``${API_KEY}`` or
+    ``xxxxxxxx``. Needs the plaintext secret, so it runs at scan time.
+    """
+
+    offline: ClassVar[bool] = False
+    words: list[str] = field(default_factory=lambda: list(DEFAULT_PLACEHOLDER_WORDS))
+    hosts: list[str] = field(default_factory=lambda: list(DEFAULT_PLACEHOLDER_HOSTS))
+
+    def is_placeholder(self, secret: str) -> bool:
+        secret = secret.strip()
+        if m := _URI_USERINFO.match(secret):
+            user, password, host = m.groups()
+            if self._is_placeholder_value(user) and self._is_placeholder_value(password):
+                return True
+            return any(fnmatch.fnmatchcase(host.lower(), h.lower()) for h in self.hosts)
+        return self._is_placeholder_value(secret)
+
+    def _is_placeholder_value(self, value: str) -> bool:
+        # A template such as ``<password>`` or ``${DB_PASSWORD}`` stands in for a value whatever it names.
+        return bool(_TEMPLATE.match(value)) or value.lower() in {w.lower() for w in self.words}
+
+    def process(self, findings: list[Finding], ctx: ProcessContext) -> list[Finding]:
+        for f in findings:
+            if f.secret and self.is_placeholder(f.secret):
+                add_content_tag(f, "placeholder")
+        return findings
+
+
 DEFAULT_PATH_TAGS: dict[str, list[str]] = {
     "test": [r"(^|/)(tests?|testing|spec|__tests__|fixtures?|testdata|mocks?)(/|$)", r"(^|/)test_[^/]*$", r"_test\.[^/]+$"],
     "example": [r"(^|/)(examples?|samples?|demo|tutorials?)(/|$)", r"\.(example|sample|template|dist)$", r"(^|/)\.env\.(example|sample|template)$"],
@@ -217,6 +278,7 @@ DEFAULT_GENERIC_RULES = ["generic-*", "*entropy*", "jwt"]
 # (notebook outputs, checksums, compiled files). Observed on a real organisation scan.
 DEFAULT_WEAK_RULES = ["box", "tly", "sirv", "unifyid", "juro", "alchemy", "eightxeight", "wit", "sumologic-access-id"]
 DEFAULT_TAG_WEIGHTS = {
+    "placeholder": -3,
     "test": -1, "example": -1, "docs": -1, "data": -1, "notebook": -1, "rendered": -1,
     "lockfile": -2, "vendored": -2, "generated": -2, "binary": -2, "checksum": -2,
     "multi-scanner": 1,

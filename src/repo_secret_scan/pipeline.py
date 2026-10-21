@@ -13,7 +13,7 @@ from pathlib import Path
 from ._proc import is_transient
 from .config import Config
 from .models import Finding, RepoScanResult, RunStatus, ScannerRun
-from .processors import PROCESSORS, ProcessContext
+from .processors import CONTENT_TAGS_KEY, PROCESSORS, ProcessContext
 from .reporters import REPORTERS
 from .scanners import SCANNERS, Scanner, ScanTimeoutError
 from .sources import Checkout, Scope, Source
@@ -205,10 +205,10 @@ def reprocess(result: RepoScanResult, config: Config) -> RepoScanResult:
     """Re-apply offline processors (tags, triage, …) to stored findings.
 
     Facts that needed the repository or the plaintext secret (``in_head``,
-    suppression) are kept from the original scan.
+    suppression, content tags) are kept from the original scan.
     """
     for f in result.findings:
-        f.tags.clear()
+        f.tags = set(f.extra.get(CONTENT_TAGS_KEY, []))
     ctx = ProcessContext(checkout=Checkout(result.repo, None, None, result.head), scope=None)
     result.findings, _ = _apply_processors(result.findings, ctx, config, offline_only=True)
     return result

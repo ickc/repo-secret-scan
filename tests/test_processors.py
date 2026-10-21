@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import string
 from pathlib import Path
 
 from repo_secret_scan.models import Finding, Location, RepoInfo, Severity, Verification
-from repo_secret_scan.processors import CrossScanner, IgnoreFile, InHead, PathTags, ProcessContext, Triage
+from repo_secret_scan.processors import (
+    CrossScanner, IgnoreFile, InHead, PathTags, Placeholder, ProcessContext, Triage,
+)
 from repo_secret_scan.sources import Checkout, FullHistory, LocalSource, WorkingTree
 
-from .conftest import fake_aws_key_id, fake_github_pat, git
+from .conftest import _rand, fake_aws_key_id, fake_github_pat, git
 
 
 def _finding(secret: str, path: str = "app.py", scanner: str = "gitleaks", rule: str = "github-pat", **kw) -> Finding:
@@ -27,6 +30,32 @@ def test_in_head_distinguishes_history_from_current(fixture_repo, tmp_path: Path
 def test_in_head_is_true_for_working_tree_scope():
     findings = InHead().process([_finding(fake_github_pat())], _ctx(scope=WorkingTree()))
     assert findings[0].in_head is True
+
+
+def test_placeholder_tags_documentation_values_only():
+    real_password = _rand(string.ascii_letters + string.digits, 20)
+    secrets = {
+        "ftp://username:password@ftp.some-host.org": True,
+        "https://<user>:<password>@db.some-host.org/x": True,
+        "postgres://${DB_USER}:${DB_PASSWORD}@db.some-host.org": True,
+        f"https://deploy:{real_password}@portal.example.test/api": True,
+        f"ftp://username:{real_password}@ftp.some-host.org": False,
+        f"https://deploy:{real_password}@db.some-host.org": False,
+        "<your-api-key>": True,
+        "xxxxxxxxxxxx": True,
+        fake_github_pat(): False,
+    }
+    findings = Placeholder().process([_finding(s, rule="URI") for s in secrets], _ctx())
+    assert [("placeholder" in f.tags) for f in findings] == list(secrets.values())
+    assert findings[0].extra["content_tags"] == ["placeholder"]
+
+
+def test_placeholder_lowers_severity():
+    finding = _finding("ftp://username:password@ftp.some-host.org", rule="FTP", scanner="trufflehog", in_head=True)
+    Placeholder().process([finding], _ctx("public"))
+    Triage().process([finding], _ctx("public"))
+    assert finding.severity is Severity.INFO
+    assert "placeholder (-3)" in finding.extra["severity_reasons"]
 
 
 def test_path_tags():
