@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 
 import pytest
@@ -103,3 +104,21 @@ def _has_plotly() -> bool:
     except ImportError:
         return False
     return True
+
+
+def test_sarif_skips_findings_without_a_path():
+    from repo_secret_scan.models import Finding, Location, RepoInfo, RepoScanResult
+    from repo_secret_scan.reporters.sarif import to_sarif
+
+    secret = secrets.token_urlsafe(12)
+    findings = [
+        Finding.create(scanner="trufflehog", rule="FTP", secret=secret, location=Location(path="app.py", line=3)),
+        # trufflehog reports secrets in commit messages with no file
+        Finding.create(scanner="trufflehog", rule="FTP", secret=secret, location=Location(path="", line=6, commit="0" * 40)),
+    ]
+    result = RepoScanResult(
+        repo=RepoInfo("o/r"), scope="history", head=None, started_at="", finished_at="",
+        status=RunStatus.OK, config_fingerprint="", findings=findings,
+    )
+    results = to_sarif(result)["runs"][0]["results"]
+    assert [r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] for r in results] == ["app.py"]

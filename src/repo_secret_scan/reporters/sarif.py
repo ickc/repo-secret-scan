@@ -39,6 +39,10 @@ def to_sarif(result: RepoScanResult) -> dict[str, Any]:
     rules: dict[str, dict[str, Any]] = {}
     results = []
     for f in result.findings:
+        # code scanning rejects results without a file (e.g. secrets in commit messages);
+        # those still reach the markdown report, annotations and --fail-on
+        if not f.location.path:
+            continue
         rule_id = f"{f.scanner}/{f.rule}"
         rules.setdefault(
             rule_id,
