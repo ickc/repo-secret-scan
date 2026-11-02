@@ -163,7 +163,8 @@ function render() {{
     <td><span class="sev"><span class="dot" style="background:${{COLORS[r.severity]}}"></span>${{r.severity}}</span></td>
     <td>${{esc(r.repo)}}</td><td>${{esc(r.rules).replaceAll(";", "<br>")}}</td><td><code>${{esc(r.preview)}}</code></td>
     <td>${{r.in_head ? "yes" : "history"}}</td><td>${{r.occurrences}}</td>
-    <td class="path">${{r.link ? `<a href="${{esc(r.link)}}">${{esc(r.location)}}</a>` : esc(r.location)}}${{r.path_count > 1 ? ` (+${{r.path_count - 1}})` : ""}}</td>
+    <td class="path">${{r.link ? `<a href="${{esc(r.link)}}">${{esc(r.location)}}</a>` : esc(r.location)}}${{r.path_count > 1 ? ` (+${{r.path_count - 1}})` : ""}}${{r.head_location && r.head_location !== r.location
+      ? `; now ${{r.head_link ? `<a href="${{esc(r.head_link)}}">${{esc(r.head_location)}}</a>` : esc(r.head_location)}}` : ""}}</td>
     <td>${{esc((r.first_seen || "").slice(0, 10))}}</td><td><code title="${{esc(r.secret_hash)}}">${{esc(r.secret_hash.slice(0, 12))}}</code></td></tr>`).join("");
 }}
 document.querySelectorAll("th").forEach(th => th.addEventListener("click", () => {{
@@ -204,8 +205,9 @@ class DashboardReporter:
                 fig, full_html=False, include_plotlyjs=(i == 0), default_width="100%",
                 config={"displaylogo": False, "responsive": True},
             ) + "</div>")
-        columns = ["severity", "repo", "rules", "preview", "in_head", "occurrences", "location", "path_count", "paths", "first_seen", "secret_hash", "link", "suppressed", "tags"]
-        data = json.dumps([{k: s[k] for k in columns} for s in dataset.secrets]).replace("</", "<\\/")
+        columns = ["severity", "repo", "rules", "preview", "in_head", "occurrences", "location", "path_count", "paths", "first_seen", "secret_hash", "link", "suppressed", "tags", "head_location", "head_link"]
+        # .get: CSVs written before a column existed can still be rendered.
+        data = json.dumps([{k: s.get(k, "") for k in columns} for s in dataset.secrets]).replace("</", "<\\/")
         page = _PAGE.format(
             title=html.escape(title),
             id_header="ID" if dataset.redacted else "Hash",

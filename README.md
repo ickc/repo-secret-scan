@@ -111,7 +111,9 @@ SARIF message says whether each one is still present.
 ```
             Source ─────► Scanners ─────► Processors ─────► Reporters
   "Org/Repo" → bare clone   gitleaks        in-head            findings.jsonl + result.json (always)
-  ./path     → as is        trufflehog      ignore-file        markdown, sarif          (per repository)
+  ./path     → as is        trufflehog      placeholder        markdown, sarif          (per repository)
+                                            embedded-data
+                                            ignore-file
                             (parallel)      path-tags *        csv, markdown, dashboard (organisation scan)
                                             cross-scanner *
                                             triage *
@@ -139,7 +141,9 @@ arguments, so `[scanner.trufflehog] concurrency = 4` becomes
 
 | Name | Offline | What it does |
 |---|---|---|
-| `in-head` | no | Is the secret still in the default-branch tip? Uses `git grep -F -f -`, so patterns go through stdin |
+| `in-head` | no | Is the secret still in the default-branch tip, and where? Uses `git grep -F -f -`, so patterns go through stdin. Scanners report the line in the commit that added a secret; reports also link to where it is now when that differs |
+| `placeholder` | no | Tags documentation placeholders (`placeholder`): URIs such as `ftp://username:password@host` or with a host reserved for examples, and values such as `<token>`, `${API_KEY}` or `xxxxxxxx` |
+| `embedded-data` | no | Tags secrets that occur only inside base64 `data:` URIs (`embedded-data`), such as images embedded in rendered HTML |
 | `ignore-file` | no | Suppresses reviewed findings using `.secret-scan-ignore.toml` in the repo, and/or a central file |
 | `path-tags` | yes | Tags the file kind: `test`, `example`, `docs`, `notebook`, `lockfile`, `vendored`, `generated`, `binary`, `checksum`, `rendered`, `data` |
 | `cross-scanner` | yes | Records which scanners found the same secret (`multi-scanner` tag) |
@@ -148,6 +152,9 @@ arguments, so `[scanner.trufflehog] concurrency = 4` becomes
 An *offline* processor needs neither the repository nor the plaintext secret.
 Offline processors are re-run whenever reports are built, and their settings
 are excluded from the cache fingerprint, so tuning triage never forces a rescan.
+Tags set at scan time from the secret or the repository (such as `placeholder`
+or `embedded-data`)
+are stored with each finding and kept when offline processors re-run.
 
 ### Triage
 
@@ -160,6 +167,7 @@ Modifiers:
 - +1 if the repository is public
 - +1 if both scanners found it
 - −1 or −2 for tags such as test, docs, notebook, vendored or binary
+- −3 for a placeholder, −2 for a match inside an embedded `data:` URI
 
 A score of ≥5 is critical, 4 high, 3 medium, 2 low, and anything lower info.
 Every rating stores its reasons, and the report shows them. A live-verified
@@ -283,7 +291,7 @@ All keys, with defaults:
 ```toml
 [scan]
 scanners = ["gitleaks", "trufflehog"]
-processors = ["in-head", "path-tags", "cross-scanner", "ignore-file", "triage"]
+processors = ["in-head", "placeholder", "embedded-data", "path-tags", "cross-scanner", "ignore-file", "triage"]
 reporters = ["markdown", "sarif"]
 retries = 2
 retry_delay = 30
@@ -292,6 +300,7 @@ retry_delay = 30
 [scanner.trufflehog]    # timeout, extra_args, max_procs, concurrency, verify (default false)
 [processor.triage]      # high_confidence_rules, generic_rules, weak_rules, tag_weights, *_score
 [processor.path-tags]   # tags = { name = [regex, …] }
+[processor.placeholder] # words, hosts (globs)
 [processor.ignore-file] # filename, path
 
 [org]                   # organisation scans only

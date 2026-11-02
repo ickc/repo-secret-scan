@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 from ._proc import git
-from .models import Finding, Severity, Verification
+from .models import Finding, Location, Severity, Verification
 from .registry import Registry
 from .sources import Checkout, Scope, WorkingTree
 
@@ -50,7 +50,12 @@ def _grep_line(secret: str) -> str:
 @PROCESSORS.register("in-head")
 @dataclass
 class InHead:
-    """Flag whether each secret is still present in the default branch tip."""
+    """Flag whether each secret is still present in the default branch tip.
+
+    Also records where it is there, in ``extra["head_location"]``: scanners
+    report the line in the commit that introduced a secret, which drifts as the
+    file changes.
+    """
 
     offline: ClassVar[bool] = False
     batch_size: int = 500
@@ -64,23 +69,151 @@ class InHead:
         if checkout.git_dir is None or checkout.head is None:
             return findings
         needles = {_grep_line(f.secret) for f in findings if f.secret}
-        present: set[str] = set()
+        present: dict[str, list[tuple[str, int]]] = defaultdict(list)
         ordered = sorted(needles)
         for i in range(0, len(ordered), self.batch_size):
             batch = ordered[i : i + self.batch_size]
             # Patterns go through stdin so secrets never appear in the process list.
             result = git(
-                "grep", "--no-color", "-o", "-h", "-I", "-F", "-f", "-", checkout.head, "--",
+                "grep", "--no-color", "-o", "-n", "-z", "-I", "-F", "-f", "-", checkout.head, "--",
                 git_dir=checkout.git_dir, input="\n".join(batch) + "\n", check=False,
             )
             if result.returncode not in (0, 1):  # 1 just means "no match"
                 raise RuntimeError(f"git grep failed ({result.returncode}): {result.stderr.strip()[:200]}")
-            found = set(result.stdout.splitlines())
-            present.update(n for n in batch if n in found)
+            # -z: "<head>:<path>\0<line>\0<match>" per match.
+            for row in result.stdout.splitlines():
+                if row.count("\0") < 2:  # a path containing a newline
+                    continue
+                name, line, match = row.split("\0", 2)
+                present[match].append((name.removeprefix(f"{checkout.head}:"), int(line)))
         for f in findings:
             if f.secret:
-                f.in_head = _grep_line(f.secret) in present
+                places = present.get(_grep_line(f.secret), [])
+                f.in_head = bool(places)
+                if places:
+                    path, line = _nearest(places, f.location)
+                    f.extra["head_location"] = {"path": path, "line": line}
         return findings
+
+
+def _nearest(places: list[tuple[str, int]], location: Location) -> tuple[str, int]:
+    """The occurrence most likely to be the reported one: same file, then closest line."""
+    return min(places, key=lambda p: (p[0] != location.path, abs(p[1] - (location.line or 0)), p))
+
+
+CONTENT_TAGS_KEY = "content_tags"
+
+
+def add_content_tag(finding: Finding, tag: str) -> None:
+    """Tag a fact read from the secret or the repository.
+
+    Such facts cannot be recomputed from stored findings, so they are also kept
+    in ``extra``, from which ``reprocess`` restores them.
+    """
+    finding.tags.add(tag)
+    stored = finding.extra.setdefault(CONTENT_TAGS_KEY, [])
+    if tag not in stored:
+        stored.append(tag)
+
+
+# Values that stand in for a credential in documentation and commented-out commands.
+DEFAULT_PLACEHOLDER_WORDS = [
+    "username", "user", "user_name", "login", "password", "passwd", "pass", "pwd", "secret", "token", "apikey",
+    "api_key", "key", "changeme", "change_me", "example", "placeholder", "dummy", "someone", "foo", "bar",
+]
+# Reserved for documentation (RFC 2606 / RFC 6761); credentials for them cannot be real.
+DEFAULT_PLACEHOLDER_HOSTS = ["example.com", "example.net", "example.org", "*.example", "*.test", "*.invalid"]
+_URI_USERINFO = re.compile(r"^[a-z][a-z0-9+.-]*://([^:/@\s]*):([^@/\s]*)@([^/:?#\s]+)", re.IGNORECASE)
+_TEMPLATE = re.compile(r"^(<[^<>]+>|\$\{[^{}]+\}|\{\{[^{}]+\}\}|%[^%]+%|x{6,}|\*{6,})$", re.IGNORECASE)
+
+
+@PROCESSORS.register("placeholder")
+@dataclass
+class Placeholder:
+    """Tag secrets that are documentation placeholders rather than credentials.
+
+    Covers URIs whose user and password are both placeholder words
+    (``ftp://username:password@host``) or whose host is reserved for
+    documentation, and whole values such as ``<token>``, ``${API_KEY}`` or
+    ``xxxxxxxx``. Needs the plaintext secret, so it runs at scan time.
+    """
+
+    offline: ClassVar[bool] = False
+    words: list[str] = field(default_factory=lambda: list(DEFAULT_PLACEHOLDER_WORDS))
+    hosts: list[str] = field(default_factory=lambda: list(DEFAULT_PLACEHOLDER_HOSTS))
+
+    def is_placeholder(self, secret: str) -> bool:
+        secret = secret.strip()
+        if m := _URI_USERINFO.match(secret):
+            user, password, host = m.groups()
+            if self._is_placeholder_value(user) and self._is_placeholder_value(password):
+                return True
+            return any(fnmatch.fnmatchcase(host.lower(), h.lower()) for h in self.hosts)
+        return self._is_placeholder_value(secret)
+
+    def _is_placeholder_value(self, value: str) -> bool:
+        # A template such as ``<password>`` or ``${DB_PASSWORD}`` stands in for a value whatever it names.
+        return bool(_TEMPLATE.match(value)) or value.lower() in {w.lower() for w in self.words}
+
+    def process(self, findings: list[Finding], ctx: ProcessContext) -> list[Finding]:
+        for f in findings:
+            if f.secret and self.is_placeholder(f.secret):
+                add_content_tag(f, "placeholder")
+        return findings
+
+
+_DATA_URI = re.compile(r"data:[\w.+-]+/[\w.+-]+(?:;[\w.+-]+=[\w.+-]+)*;base64,[A-Za-z0-9+/=]+")
+
+
+@PROCESSORS.register("embedded-data")
+@dataclass
+class EmbeddedData:
+    """Tag secrets that occur only inside base64 ``data:`` URIs.
+
+    Rendered HTML embeds images and fonts as data URIs. Keyword-proximity
+    detectors match the keyword case-insensitively, so a long enough base64 run
+    spells it somewhere and is followed by a token-shaped tail. Reads each file
+    at the commit the finding came from, so it runs at scan time.
+    """
+
+    offline: ClassVar[bool] = False
+
+    def process(self, findings: list[Finding], ctx: ProcessContext) -> list[Finding]:
+        by_file: dict[tuple[str | None, str], list[Finding]] = defaultdict(list)
+        for f in findings:
+            if f.secret and f.location.path:
+                by_file[(f.location.commit, f.location.path)].append(f)
+        for (commit, path), fs in by_file.items():
+            text = _read_file(ctx.checkout, commit, path)
+            if not text or "base64," not in text:
+                continue
+            spans = [m.span() for m in _DATA_URI.finditer(text)]
+            for f in fs:
+                if spans and _only_inside(text, _grep_line(f.secret), spans):
+                    add_content_tag(f, "embedded-data")
+        return findings
+
+
+def _read_file(checkout: Checkout, commit: str | None, path: str) -> str | None:
+    if commit and checkout.git_dir is not None:
+        result = git("show", f"{commit}:{path}", git_dir=checkout.git_dir, check=False)
+        return result.stdout if result.returncode == 0 else None
+    if checkout.worktree is not None and (checkout.worktree / path).is_file():
+        return (checkout.worktree / path).read_text(errors="replace")
+    return None
+
+
+def _only_inside(text: str, needle: str, spans: list[tuple[int, int]]) -> bool:
+    """Whether ``needle`` occurs in ``text`` and every occurrence lies within one of ``spans``."""
+    start = text.find(needle)
+    if start < 0:
+        return False
+    while start >= 0:
+        end = start + len(needle)
+        if not any(s <= start and end <= e for s, e in spans):
+            return False
+        start = text.find(needle, start + 1)
+    return True
 
 
 DEFAULT_PATH_TAGS: dict[str, list[str]] = {
@@ -217,6 +350,7 @@ DEFAULT_GENERIC_RULES = ["generic-*", "*entropy*", "jwt"]
 # (notebook outputs, checksums, compiled files). Observed on a real organisation scan.
 DEFAULT_WEAK_RULES = ["box", "tly", "sirv", "unifyid", "juro", "alchemy", "eightxeight", "wit", "sumologic-access-id"]
 DEFAULT_TAG_WEIGHTS = {
+    "placeholder": -3, "embedded-data": -2,
     "test": -1, "example": -1, "docs": -1, "data": -1, "notebook": -1, "rendered": -1,
     "lockfile": -2, "vendored": -2, "generated": -2, "binary": -2, "checksum": -2,
     "multi-scanner": 1,
