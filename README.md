@@ -142,7 +142,7 @@ arguments, so `[scanner.trufflehog] concurrency = 4` becomes
 | Name | Offline | What it does |
 |---|---|---|
 | `in-head` | no | Is the secret still in the default-branch tip, and where? Uses `git grep -F -f -`, so patterns go through stdin. Scanners report the line in the commit that added a secret; reports also link to where it is now when that differs |
-| `placeholder` | no | Tags documentation placeholders (`placeholder`): URIs such as `ftp://username:password@host` or with a host reserved for examples, and values such as `<token>`, `${API_KEY}` or `xxxxxxxx` |
+| `placeholder` | no | Tags documentation placeholders (`placeholder`): URIs whose user and password are placeholder words (such as `username` and `password`) or whose host is reserved for examples, and values such as `<token>`, `${API_KEY}` or `xxxxxxxx` |
 | `embedded-data` | no | Tags secrets that occur only inside base64 `data:` URIs (`embedded-data`), such as images embedded in rendered HTML |
 | `ignore-file` | no | Suppresses reviewed findings using `.secret-scan-ignore.toml` in the repo, and/or a central file |
 | `path-tags` | yes | Tags the file kind: `test`, `example`, `docs`, `notebook`, `lockfile`, `vendored`, `generated`, `binary`, `checksum`, `rendered`, `data` |
