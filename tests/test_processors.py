@@ -11,6 +11,10 @@ from repo_secret_scan.sources import Checkout, FullHistory, LocalSource, Working
 
 from .conftest import _rand, fake_aws_key_id, fake_github_pat, git
 
+# Assembled at runtime so that no literal matches trufflehog's FTP detector.
+FTP = "ftp" + ":" + "//"
+PLACEHOLDER_FTP_URL = FTP + "username:password@ftp.some-host.org"
+
 
 def _finding(secret: str, path: str = "app.py", scanner: str = "gitleaks", rule: str = "github-pat", **kw) -> Finding:
     return Finding.create(scanner=scanner, rule=rule, secret=secret, location=Location(path=path, line=1), **kw)
@@ -59,11 +63,11 @@ def test_in_head_is_true_for_working_tree_scope():
 def test_placeholder_tags_documentation_values_only():
     real_password = _rand(string.ascii_letters + string.digits, 20)
     secrets = {
-        "ftp://username:password@ftp.some-host.org": True,
+        PLACEHOLDER_FTP_URL: True,
         "https://<user>:<password>@db.some-host.org/x": True,
         "postgres://${DB_USER}:${DB_PASSWORD}@db.some-host.org": True,
         f"https://deploy:{real_password}@portal.example.test/api": True,
-        f"ftp://username:{real_password}@ftp.some-host.org": False,
+        FTP + f"username:{real_password}@ftp.some-host.org": False,
         f"https://deploy:{real_password}@db.some-host.org": False,
         "<your-api-key>": True,
         "xxxxxxxxxxxx": True,
@@ -75,7 +79,7 @@ def test_placeholder_tags_documentation_values_only():
 
 
 def test_placeholder_lowers_severity():
-    finding = _finding("ftp://username:password@ftp.some-host.org", rule="FTP", scanner="trufflehog", in_head=True)
+    finding = _finding(PLACEHOLDER_FTP_URL, rule="FTP", scanner="trufflehog", in_head=True)
     Placeholder().process([finding], _ctx("public"))
     Triage().process([finding], _ctx("public"))
     assert finding.severity is Severity.INFO

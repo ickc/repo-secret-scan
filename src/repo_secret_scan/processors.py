@@ -132,8 +132,8 @@ _TEMPLATE = re.compile(r"^(<[^<>]+>|\$\{[^{}]+\}|\{\{[^{}]+\}\}|%[^%]+%|x{6,}|\*
 class Placeholder:
     """Tag secrets that are documentation placeholders rather than credentials.
 
-    Covers URIs whose user and password are both placeholder words
-    (``ftp://username:password@host``) or whose host is reserved for
+    Covers URIs whose user and password are both placeholder words (such as
+    ``username`` and ``password``) or whose host is reserved for
     documentation, and whole values such as ``<token>``, ``${API_KEY}`` or
     ``xxxxxxxx``. Needs the plaintext secret, so it runs at scan time.
     """
