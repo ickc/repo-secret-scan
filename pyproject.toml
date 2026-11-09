@@ -11,7 +11,10 @@ requires-python = ">=3.11"
 license = "BSD-3-Clause"
 keywords = ["secrets", "gitleaks", "trufflehog", "security", "github"]
 dependencies = [
-    "typer>=0.9",
+    # GitHub API client and repository listing. Pinned to a commit until
+    # ghinsight is on PyPI; then this becomes "ghinsight>=0.2,<0.3".
+    "ghinsight @ git+https://github.com/ickc/ghinsight@34e3bd74bf9f32066c6ed719691e5a8960d84a78",
+    "typer>=0.12",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +25,9 @@ repo-secret-scan = "repo_secret_scan.cli:app"
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/repo_secret_scan"]
