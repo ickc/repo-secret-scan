@@ -11,12 +11,14 @@ import json
 import os
 import re
 import shutil
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ._proc import CommandError, git, run
+from ghinsight.client import GitHubClient, GitHubError, resolve_token
+from ghinsight.repos import visibility_of
+
+from ._proc import CommandError, git
 from .models import RepoInfo
 
 _SLUG_RE = re.compile(r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<name>[A-Za-z0-9_.-]+?)(?:\.git)?$")
@@ -123,17 +125,6 @@ class LocalSource:
 
 # --------------------------------------------------------------------------- github
 
-_VISIBILITIES = ("public", "private", "internal")
-
-
-def _visibility_of(repository: dict) -> str | None:
-    if repository.get("visibility") in _VISIBILITIES:
-        return repository["visibility"]
-    if isinstance(repository.get("private"), bool):
-        return "private" if repository["private"] else "public"
-    return None
-
-
 def github_actions_repo(path: Path) -> RepoInfo | None:
     """Identify the repository when scanning the GitHub Actions workspace checkout.
 
@@ -153,19 +144,14 @@ def github_actions_repo(path: Path) -> RepoInfo | None:
         repository = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()).get("repository") or {}
     except (KeyError, OSError, ValueError, AttributeError):
         pass
-    visibility = _visibility_of(repository)
+    visibility = visibility_of(repository)
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if visibility is None and token:
-        api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-        request = urllib.request.Request(
-            f"{api}/repos/{slug}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "User-Agent": "repo-secret-scan"},
-        )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                repository = json.load(response)
-            visibility = _visibility_of(repository)
-        except (OSError, ValueError):
+            with GitHubClient(token, retries=0) as client:  # fail fast; base URL from GITHUB_API_URL
+                repository = client.get(f"/repos/{slug}")
+            visibility = visibility_of(repository)
+        except (GitHubError, ValueError):
             pass
 
     server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
@@ -180,14 +166,8 @@ def github_actions_repo(path: Path) -> RepoInfo | None:
 
 
 def github_token() -> str | None:
-    for var in ("GH_TOKEN", "GITHUB_TOKEN"):
-        if os.environ.get(var):
-            return os.environ[var]
-    if shutil.which("gh"):
-        result = run(["gh", "auth", "token"], check=False)
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    return None
+    """``GH_TOKEN``, ``GITHUB_TOKEN``, or ``gh auth token``; ``None`` if there is none."""
+    return resolve_token(required=False)
 
 
 def _auth_env(token: str | None) -> dict[str, str]:

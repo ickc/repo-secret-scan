@@ -12,14 +12,15 @@ Scratch directory layout::
 from __future__ import annotations
 
 import fnmatch
-import json
 import logging
 import time
-import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict
 from pathlib import Path
+
+from ghinsight.client import GitHubClient
+from ghinsight.repos import list_repos as list_owner_repos
 
 from .config import Config, OrgOptions
 from .dataset import Dataset
@@ -36,40 +37,14 @@ log = logging.getLogger(__name__)
 _RESCAN_STATUSES = {RunStatus.FAILED, RunStatus.TIMEOUT}
 
 
-def _api_get(url: str, token: str | None) -> tuple[object, str | None]:
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "repo-secret-scan", "X-GitHub-Api-Version": "2022-11-28"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as response:
-        body = json.load(response)
-        next_url = None
-        for part in (response.headers.get("Link") or "").split(","):
-            if 'rel="next"' in part:
-                next_url = part[part.index("<") + 1 : part.index(">")]
-        return body, next_url
-
-
 def list_repos(owner: str, token: str | None) -> list[RepoInfo]:
-    account, _ = _api_get(f"https://api.github.com/users/{urllib.parse.quote(owner)}", token)
-    kind = "orgs" if isinstance(account, dict) and account.get("type") == "Organization" else "users"
-    url: str | None = f"https://api.github.com/{kind}/{urllib.parse.quote(owner)}/repos?type=all&per_page=100"
-    repos = []
-    while url:
-        page, url = _api_get(url, token)
-        for r in page:  # type: ignore[union-attr]
-            repos.append(
-                RepoInfo(
-                    slug=r["full_name"],
-                    url=r["html_url"],
-                    visibility=r.get("visibility") or ("private" if r.get("private") else "public"),
-                    default_branch=r.get("default_branch"),
-                    fork=r.get("fork"),
-                    archived=r.get("archived"),
-                    pushed_at=r.get("pushed_at"),
-                    size_kb=r.get("size"),
-                )
-            )
-    return sorted(repos, key=lambda r: r.slug.lower())
+    """Every repository of an organisation or user, sorted by slug.
+
+    For the token's own user this includes private repositories. Without a token,
+    only public repositories are listed.
+    """
+    with GitHubClient(token or "") as client:
+        return [RepoInfo(**asdict(repo)) for repo in list_owner_repos(owner, client)]
 
 
 def select_repos(repos: list[RepoInfo], options: OrgOptions) -> list[RepoInfo]:
